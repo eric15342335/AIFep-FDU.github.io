@@ -1,33 +1,41 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 70}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 45, "wrappingWidth": 280}}}%%
 %% Components and trust boundaries of the agentic harness.
-flowchart LR
-    subgraph HOST["Host runner"]
-        direction TB
-        prep["Prepare per document<br/><small>page images + PDF text layer</small>"]
-        launch["Launch per question<br/><small>write prompt · N sandboxes in parallel</small>"]
-        collect["Collect<br/><small>re-validate · submission.xlsx · cost report</small>"]
-        prep --> launch
+%% Edges between subgraphs (not their nodes) keep each subgraph's own direction.
+flowchart TB
+    subgraph HOST["Host runner · tableqa/agent.py"]
+        direction LR
+        prep["Prepare documents<br/><small>page images · PDF text layer</small>"]
+        launch["Launch sandboxes<br/><small>one per question, N parallel</small>"]
+        collect["Collect<br/><small>re-validate · submission.xlsx</small><br/><small>optional --fallback fills gaps</small>"]
+        prep --> launch ~~~ collect
     end
 
-    subgraph NET["Isolated network · no internet"]
-        agent["Sandbox · pi agent<br/><small>tools: zoom · answer · bash · read · write</small><br/><small>read-only root · no capabilities · 1 CPU · 2 GB</small>"]
+    subgraph NET["tableqa-sandbox · internal network, no internet"]
+        direction LR
+        agent["Sandbox × N · pi agent<br/><small>zoom · answer · bash · read · write</small>"]
+        files[("/task ro: pages · text layer · prompt<br/>/work rw: answer.json · session")]
+        agent --- files
     end
 
-    gw["Model gateway · LiteLLM<br/><small>only host the sandbox can reach</small>"]
-    model["Qwen model API<br/><small>OpenAI-compatible</small>"]
-    trace["Tracing · Arize Phoenix"]
+    subgraph SVC["Gateway services"]
+        direction LR
+        gw["Model gateway · LiteLLM<br/><small>joins both networks</small>"]
+        model["Qwen model API<br/><small>OpenAI-compatible</small>"]
+        trace["Tracing · Arize Phoenix"]
+        gw --> model
+        gw -. "spans tagged run: / q:" .-> trace
+    end
 
-    launch -- "docker run + read-only mounts" --> agent
-    agent -- "answer.json + transcript" --> collect
-    agent -- "model calls" --> gw
-    gw --> model
-    gw -. "spans: metadata + run/question tags" .-> trace
+    HOST <-->|"docker run · mounts"| NET
+    NET -- "model calls: the only exit" --> SVC
 
     classDef host fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
     classDef box fill:#ecfdf5,stroke:#10b981,color:#064e3b,stroke-width:2px
     classDef ext fill:#fff7ed,stroke:#f97316,color:#7c2d12
     class prep,launch,collect host
     class agent box
+    class files host
     class gw,model,trace ext
     style HOST fill:#f8fafc,stroke:#6366f1,stroke-width:2px
     style NET fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:6 4
+    style SVC fill:#f8fafc,stroke:#f97316

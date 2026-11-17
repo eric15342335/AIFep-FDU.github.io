@@ -1,35 +1,38 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "actorBkg": "#eef2ff", "actorBorder": "#6366f1", "actorTextColor": "#1e1b4b", "noteBkgColor": "#fff7ed", "noteBorderColor": "#f97316", "loopTextColor": "#334155", "labelBoxBkgColor": "#f1f5f9", "labelBoxBorderColor": "#94a3b8", "signalColor": "#475569", "signalTextColor": "#0f172a"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "actorBkg": "#eef2ff", "actorBorder": "#6366f1", "actorTextColor": "#1e1b4b", "noteBkgColor": "#f1f5f9", "noteBorderColor": "#94a3b8", "loopTextColor": "#334155", "labelBoxBkgColor": "#f1f5f9", "labelBoxBorderColor": "#94a3b8", "signalColor": "#475569", "signalTextColor": "#0f172a"}, "sequence": {"mirrorActors": false, "noteMargin": 12}}}%%
 %% One question: how an answer gets accepted and collected.
 sequenceDiagram
     autonumber
     participant R as Runner (host)
     participant S as Sandbox (pi agent)
-    participant M as Model
+    participant M as Model · via LiteLLM
 
-    R->>S: docker run: page images, text layer, prompt
-    S->>M: prompt + pages + tool list
+    Note over R: skip if this question already<br/>has an ok or empty record
+    R->>S: docker run: pages, text layer, prompt
+    S->>M: prompt + page images + tool list
 
-    loop until answer accepted, plain-text reply, or turn cap (25)
+    loop until accepted, plain-text reply, or 25 turns
         M-->>S: tool call
         alt zoom / bash / read / write
+            S->>S: run tool
             S->>M: tool result (crop image or output)
         else answer
-            Note right of S: validate with the baseline's normalize_response
+            Note right of S: validate:<br/>normalize_response
             alt invalid, or first empty answer
                 S->>M: "Rejected: reason"
             else valid
-                Note right of S: write answer.json, end session
+                Note right of S: write answer.json,<br/>end session
             end
         end
     end
+    Note right of S: turn cap: abort,<br/>no answer.json
 
-    opt wall-clock timeout (host)
+    opt 1800 s wall clock
         R->>S: docker kill
     end
     S-->>R: container exits
-    Note over R: re-validate answer.json
+    Note over R,S: re-validate answer.json
     alt valid and non-empty
-        Note over R: agent answer goes into submission.xlsx
-    else missing, invalid, empty or timed out
-        Note over R: leave empty (or take --fallback answer)
+        Note over R,S: use agent answer
+    else missing, invalid or empty
+        Note over R,S: leave empty,<br/>or use --fallback
     end
