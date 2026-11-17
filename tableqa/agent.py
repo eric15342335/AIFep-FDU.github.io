@@ -35,6 +35,7 @@ SUBMIT_NOTE = (
     "提交方式：不要直接输出 JSON，而是调用 answer 工具。answer 参数填写上述 JSON 中 answer 字段的值；"
     "推理题把 calculations 数组填入 calculations 参数。"
 )
+NO_TEXT_NOTE = "本文档没有 PDF 文本层（没有 page-*.txt 或 words-*.json），只能用 zoom 读图。"
 
 
 @dataclass(frozen=True)
@@ -150,7 +151,10 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "prompt.md").write_text(task_prompt(question), encoding="utf-8")
+    prompt = task_prompt(question)
+    if not any(doc_dir.glob("page-*.txt")):  # pilot: agents grepped a missing text layer first
+        prompt += "\n" + NO_TEXT_NOTE
+    (task_dir / "prompt.md").write_text(prompt, encoding="utf-8")
     (task_dir / "question.json").write_text(
         json.dumps({"question_type": question.question_type, "answer_format": question.answer_format}),
         encoding="utf-8",
