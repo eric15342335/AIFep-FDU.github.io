@@ -1,0 +1,21 @@
+# Pass every model name through to the OpenAI-compatible upstream; log every call to Phoenix.
+# hosted_vllm is LiteLLM's generic self-managed provider; it forwards chat_template_kwargs.
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "hosted_vllm/*"
+      api_base: os.environ/UPSTREAM_API_BASE
+      api_key: "none"
+
+# No key: the port is bound to 127.0.0.1 and the sandbox network is internal; the upstream is unauthenticated too.
+general_settings:
+  dangerously_permit_weak_or_unset_master_key: true
+
+litellm_settings:
+  callbacks: ["arize_phoenix"]
+  # Spans would carry every base64 image (~3 MB per call, ~100+ GB per run). Phoenix keeps
+  # latency, tokens, tags and errors; full transcripts live in runs/<name>/work/<id>/session.
+  # Set to false for small pilots if you want message bodies in Phoenix.
+  turn_off_message_logging: true
+  drop_params: false
+  request_timeout: 900

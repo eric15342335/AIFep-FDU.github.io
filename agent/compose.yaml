@@ -1,0 +1,40 @@
+# Gateway + tracing for the agent experiment. Start from the repo root:
+#   source .env && docker compose -f agent/compose.yaml up -d
+# Sandboxes join the internal `tableqa-sandbox` network; LiteLLM is the only thing they can reach.
+name: tableqa-agent
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix@sha256:09ec48906c054a27dd09a88c8e6bcc24fe89649d3ecc94d3a8ed394e21279b31  # v21.1.0
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+      PHOENIX_ENABLE_AUTH: "false"  # local only: the port is bound to 127.0.0.1
+    volumes:
+      - phoenix-data:/mnt/data
+    ports:
+      - "127.0.0.1:6006:6006"
+
+  litellm:
+    image: ghcr.io/berriai/litellm@sha256:11175975a3093e05e92faee2fe2fe3412a3ae2fcaa849eb0fe25d5f0d8bcb2e9  # main-stable, pulled 2026-11-17
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes:
+      - ./litellm.yaml:/app/config.yaml:ro
+    environment:
+      UPSTREAM_API_BASE: ${AGENT_BASE_URL:?source .env first}
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
+      PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
+      PHOENIX_PROJECT_NAME: tableqa-agent
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:4000:4000"
+    networks: [default, sandbox]
+    depends_on: [phoenix]
+
+networks:
+  sandbox:
+    name: tableqa-sandbox
+    internal: true
+
+volumes:
+  phoenix-data:
