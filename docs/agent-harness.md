@@ -90,6 +90,24 @@ source .env && uv run python baseline.py run --custom-endpoint --base-url http:/
 
 Statuses: `ok` (validated answer), `empty` (agent submitted an empty answer), `no_answer` (session ended without `answer`), `timeout`, `failed`.
 
+At the turn cap (`--max-turns`, default 25) the agent gets one grace turn with only `answer` available. Sessions saved before that existed can be given just that turn with `--resume`, which skips every question that already has an answer.
+
+### Full run (2026-11-17)
+
+| | Baseline (one call per question) | pi agent |
+|---|---|---|
+| Platform score | 71.6 (≈650/908 correct) | **78.7** (≈715/908 correct) |
+| Answers submitted | 908 | 907 (1 deliberately empty) |
+
+- No answers were filled from the baseline.
+- Agent cost: 19.95 M input tokens and 0.99 M output tokens over 908 questions, with an average of 3.14 turns per question.
+- Tool calls: 1523 `zoom`, 725 `bash`, 134 `read` and 917 `answer`.
+- At qwen3.8-flash list prices on the official API this would cost **¥18.65** without caching, or **¥8.05** if every resent prefix hit the implicit cache. That is about ¥0.01–0.02 per question.
+- Total sandbox time was 38.4 h, run at 48 in parallel.
+- Weak spots found by comparing answers with the baseline's (no ground truth):
+  - Table-structure questions: the agent tends to return more cells than the requested sub-range.
+  - About 30 string answers are written as sentences rather than bare values.
+
 ## Observability
 
 Phoenix gets one span per model call with latency, token counts, errors and the tag `run:<name>,q:<id>` (filter on `metadata.requester_metadata.headers.x-litellm-tags`). Message bodies are off (`turn_off_message_logging` in `agent/litellm.yaml`): every call carries base64 images (1–2 MB), and at 32 workers Phoenix fell behind and LiteLLM dropped span batches over the 64 MB export limit. Full transcripts are the pi session files; `pi --export <file>` turns one into HTML.
