@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import json
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from tableqa.agent import prepare_materials, session_stats, task_prompt
+from tableqa.agent import AgentConfig, prepare_materials, run, session_stats, task_prompt
 from tableqa.xlsxio import Question
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,3 +69,11 @@ def test_sandbox_zoom(tmp_path, monkeypatch):
     assert info.startswith("1000x800")
     with pytest.raises(ValueError):
         tools.zoom(1, [10, 10, 12, 12], str(tmp_path / "bad.png"))
+
+
+@pytest.mark.parametrize("name, qid", [("../x", "1"), ("ok", "../../.."), ("ok", "a/b")])
+def test_run_rejects_ids_that_would_escape_the_run_dir(tmp_path, name, qid):
+    q = question(id=qid)
+    with pytest.raises(ValueError, match="unsafe"):
+        asyncio.run(run([q], [q], tmp_path, tmp_path, AgentConfig(name=name, model="qwen"), {}))
+    assert not any(tmp_path.iterdir())

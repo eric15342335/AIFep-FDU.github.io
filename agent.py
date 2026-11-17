@@ -17,6 +17,13 @@ from tableqa.xlsxio import id_key, read_questions
 GATEWAY = "http://127.0.0.1:4000/v1"
 
 
+def positive(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tests", type=Path, default=Path("data/tests.xlsx"))
@@ -33,13 +40,13 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--output-dir", type=Path, default=Path("runs"))
     run.add_argument("--fallback", type=Path, help="submission whose answers fill questions the agent missed")
     run.add_argument("--image", default="tableqa-agent:dev")
-    run.add_argument("--workers", type=int, default=16)
-    run.add_argument("--timeout", type=int, default=1800, help="seconds per question")
-    run.add_argument("--max-turns", type=int, default=25)
+    run.add_argument("--workers", type=positive, default=16)
+    run.add_argument("--timeout", type=positive, default=1800, help="seconds per question")
+    run.add_argument("--max-turns", type=positive, default=25)
     run.add_argument(
         "--thinking", choices=["off", "high"], default="high", help="high = Qwen reasoning_effort xhigh (max)"
     )
-    run.add_argument("--limit", type=int, help="first N questions only")
+    run.add_argument("--limit", type=positive, help="first N questions only")
     run.add_argument("--ids", help="comma-separated question ids")
 
     args = parser.parse_args(argv)

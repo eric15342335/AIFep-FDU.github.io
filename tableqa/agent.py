@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -25,6 +26,7 @@ from .prompts import question_prompt
 from .schema import normalize_response
 from .xlsxio import Question, id_key, read_rows, write_submission
 
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 NETWORK = "tableqa-sandbox"
 SUBMIT_NOTE = (
     "提交方式：不要直接输出 JSON，而是调用 answer 工具。answer 参数填写上述 JSON 中 answer 字段的值；"
@@ -160,21 +162,18 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
         "cached": False,
     }
     started = time.monotonic()
-    process = await asyncio.create_subprocess_exec(
-        *docker_command(question, config, doc_dir, task_dir, work, name),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), config.timeout)
-        result["exit_code"] = process.returncode
-    except TimeoutError:
-        subprocess.run(["docker", "kill", name], capture_output=True, check=False)
-        stdout, stderr = await process.communicate()
-        result["status"] = "timeout"
+    # Stream to files, not host memory: the sandbox controls how much it prints.
+    with (work / "stdout.txt").open("wb") as stdout, (work / "stderr.txt").open("wb") as stderr:
+        process = await asyncio.create_subprocess_exec(
+            *docker_command(question, config, doc_dir, task_dir, work, name), stdout=stdout, stderr=stderr
+        )
+        try:
+            result["exit_code"] = await asyncio.wait_for(process.wait(), config.timeout)
+        except TimeoutError:
+            subprocess.run(["docker", "kill", name], capture_output=True, check=False)
+            await process.wait()
+            result["status"] = "timeout"
     result["seconds"] = round(time.monotonic() - started, 1)
-    (work / "stdout.txt").write_bytes(stdout)
-    (work / "stderr.txt").write_bytes(stderr)
 
     answer_file = work / "answer.json"
     if answer_file.is_file():
@@ -188,7 +187,7 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
             result["error"] = f"host validation: {exc}"
     elif result["status"] != "timeout":
         result["status"] = "no_answer"
-        result["error"] = stderr.decode("utf-8", "replace")[-500:]
+        result["error"] = (work / "stderr.txt").read_bytes()[-2000:].decode("utf-8", "replace")
     result.update(session_stats(work / "session"))
     atomic_json(record_path, result)
     return result
@@ -199,8 +198,13 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
     usage = Counter[str]()
     turns = 0
     for path in session_dir.glob("**/*.jsonl"):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            entry = json.loads(line)
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:  # stats only: a truncated line must not cost the validated answer
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
             message = entry.get("message") or {}
             if message.get("role") == "toolResult":
                 tools[message.get("toolName", "?")] += 1
@@ -220,6 +224,10 @@ async def run(
     fallback: dict[str, str],
     progress=print,
 ) -> dict[str, Any]:
+    # Names and ids become paths and container names: keep them to safe characters.
+    for value in [config.name, *(id_key(q.id) for q in selected)]:
+        if not SAFE_NAME.fullmatch(value):
+            raise ValueError(f"unsafe run name or question id: {value!r}")
     run_dir = out_dir / config.name
     docs = {
         name: prepare_materials(source_path(files_dir, name), out_dir / "cache")
