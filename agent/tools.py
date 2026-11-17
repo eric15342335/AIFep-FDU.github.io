@@ -9,6 +9,7 @@ sys.path.insert(0, "/opt")
 
 MAX_LONG_SIDE = 1600  # enlarged crop size; enough detail without blowing up the context
 MAX_SCALE = 4.0
+MAX_ASPECT = 50  # Qwen's image processor rejects > 200:1, and the bad image then fails every later call
 
 
 def zoom(page: int, box: list[float], out: str) -> str:
@@ -25,6 +26,8 @@ def zoom(page: int, box: list[float], out: str) -> str:
         crop = image.crop(
             (round(x0 * w / 1000), round(y0 * h / 1000), round(x1 * w / 1000), round(y1 * h / 1000))
         )
+    if max(crop.size) > MAX_ASPECT * min(crop.size):
+        raise ValueError(f"region too thin ({crop.width}x{crop.height}px): enlarge the short side")
     scale = min(MAX_SCALE, MAX_LONG_SIDE / max(crop.size))
     if scale > 1:
         crop = crop.resize((round(crop.width * scale), round(crop.height * scale)), Image.Resampling.LANCZOS)

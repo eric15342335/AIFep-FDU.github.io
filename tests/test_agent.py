@@ -80,6 +80,8 @@ def test_sandbox_zoom(tmp_path, monkeypatch):
     assert info.startswith("1000x800")
     with pytest.raises(ValueError):
         tools.zoom(1, [10, 10, 12, 12], str(tmp_path / "bad.png"))
+    with pytest.raises(ValueError, match="too thin"):  # 1000x8 px: Qwen rejects > 200:1
+        tools.zoom(1, [0, 0, 1000, 10], str(tmp_path / "thin.png"))
 
 
 @pytest.mark.parametrize("name, qid", [("../x", "1"), ("ok", "../../.."), ("ok", "a/b")])
