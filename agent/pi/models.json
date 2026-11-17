@@ -1,0 +1,40 @@
+{
+  "providers": {
+    "local": {
+      "baseUrl": "http://litellm:4000/v1",
+      "api": "openai-completions",
+      "apiKey": "none",
+      "headers": { "x-litellm-tags": "$TABLEQA_TAG" },
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "maxTokensField": "max_tokens",
+        "thinkingFormat": "chat-template",
+        "chatTemplateKwargs": {
+          "enable_thinking": { "$var": "thinking.enabled" },
+          "preserve_thinking": true,
+          "reasoning_effort": { "$var": "thinking.effort", "omitWhenOff": true }
+        }
+      },
+      "models": [
+        {
+          "id": "set-by-entrypoint",
+          "name": "set-by-entrypoint",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "xhigh"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 262144,
+          "maxTokens": 65536,
+          "samplingParams": { "temperature": 1.0, "top_p": 0.95, "top_k": 20 },
+          "samplingParamsByThinkingLevel": { "off": { "temperature": 0.7, "top_p": 0.8 } }
+        }
+      ]
+    }
+  }
+}
