@@ -121,3 +121,8 @@ Thinking defaults to the maximum: pi level `high` maps to `reasoning_effort: xhi
 ## Sandbox limits
 
 Per container: internal network (only the gateway is reachable), read-only root filesystem, 512 MB tmpfs `/tmp`, writable `/work` only, 1 CPU, 2 GB RAM, 256 processes, all capabilities dropped, non-root user. Python packages: pillow, pymupdf, openpyxl, numpy, pandas, opencv-python-headless.
+
+Not limited, bounded only by the per-question timeout:
+
+- **Disk in `/work`:** it is a host bind mount without a quota, so a runaway script can fill the host disk. Watch free space on a full run.
+- **Model calls from tools:** code run through `bash` can call the gateway directly, outside the turn cap. The gateway has no per-sandbox budget; Phoenix shows such calls under the question's tag only if they set the tag header, so compare `report.json` tokens with the gateway's totals.
