@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from tableqa.agent import AgentConfig, prepare_materials, run, session_stats, task_prompt
+from tableqa.agent import AgentConfig, cost_rmb, prepare_materials, run, session_stats, task_prompt
 from tableqa.xlsxio import Question
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +51,17 @@ def test_session_stats(tmp_path):
     (tmp_path / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
     stats = session_stats(tmp_path)
     assert stats["turns"] == 1 and stats["tools"] == {"zoom": 2} and stats["usage"]["input"] == 10
+
+
+def test_cost_estimate_counts_previous_call_as_cached_prefix(tmp_path):
+    turns = [{"input": 5000, "output": 200}, {"input": 7000, "output": 100}]
+    lines = [{"message": {"role": "assistant", "usage": u}} for u in turns]
+    (tmp_path / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    usage = session_stats(tmp_path)["usage"]
+    assert usage["cachedEstimate"] == 5200  # turn 2 resends turn 1's prompt and reply
+    cost = cost_rmb(usage)
+    assert cost["no_cache"] == round((12000 * 0.8 + 300 * 2.7) / 1e6, 4)
+    assert cost["prefix_cache_best_case"] == round((6800 * 0.8 + 5200 * 0.1 + 300 * 2.7) / 1e6, 4)
 
 
 def test_sandbox_check_uses_baseline_validator():

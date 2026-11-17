@@ -28,6 +28,9 @@ from .xlsxio import Question, id_key, read_rows, write_submission
 
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 NETWORK = "tableqa-sandbox"
+# qwen3.8-flash list price on Bailian (Beijing), RMB per million tokens, read 2026-11-17.
+# Same for thinking and non-thinking; output includes the reasoning tokens.
+PRICE_RMB = {"input": 0.8, "cached_input": 0.1, "output": 2.7}
 SUBMIT_NOTE = (
     "提交方式：不要直接输出 JSON，而是调用 answer 工具。answer 参数填写上述 JSON 中 answer 字段的值；"
     "推理题把 calculations 数组填入 calculations 参数。"
@@ -198,6 +201,7 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
     usage = Counter[str]()
     turns = 0
     for path in session_dir.glob("**/*.jsonl"):
+        history = 0  # tokens of the previous call's prompt + reply: the next call's shared prefix
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:  # stats only: a truncated line must not cost the validated answer
                 entry = json.loads(line)
@@ -210,9 +214,26 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
                 tools[message.get("toolName", "?")] += 1
             elif message.get("role") == "assistant":
                 turns += 1
-                for field in ("input", "output", "cacheRead"):
-                    usage[field] += int((message.get("usage") or {}).get(field) or 0)
+                raw = message.get("usage") or {}
+                counts = {f: int(raw.get(f) or 0) for f in ("input", "output", "cacheRead")}
+                usage.update(counts)
+                # The server reports no cache hits, so estimate what the official API's implicit
+                # prefix cache could hit: everything the previous call already sent or received.
+                if not counts["cacheRead"]:
+                    usage["cachedEstimate"] += min(counts["input"], history)
+                history = counts["input"] + counts["cacheRead"] + counts["output"]
     return {"turns": turns, "tools": dict(tools), "usage": dict(usage)}
+
+
+def cost_rmb(tokens: dict[str, int]) -> dict[str, float]:
+    """What these tokens would cost on the official API, without and with prefix-cache hits."""
+    prompt, output = tokens.get("input", 0) + tokens.get("cacheRead", 0), tokens.get("output", 0)
+    cached = tokens.get("cacheRead", 0) + tokens.get("cachedEstimate", 0)
+    with_cache = (prompt - cached) * PRICE_RMB["input"] + cached * PRICE_RMB["cached_input"]
+    return {
+        "no_cache": round((prompt * PRICE_RMB["input"] + output * PRICE_RMB["output"]) / 1e6, 4),
+        "prefix_cache_best_case": round((with_cache + output * PRICE_RMB["output"]) / 1e6, 4),
+    }
 
 
 async def run(
@@ -264,6 +285,7 @@ async def run(
         "tool_calls": dict(sum((Counter(r.get("tools", {})) for r in results), Counter())),
         "mean_turns": round(sum(r.get("turns", 0) for r in results) / max(1, len(results)), 2),
         "tokens": dict(usage),
+        "official_api_cost_rmb": cost_rmb(usage),
         "sandbox_seconds": round(sum(r.get("seconds", 0) for r in results), 1),
     }
     atomic_json(run_dir / "report.json", report)
