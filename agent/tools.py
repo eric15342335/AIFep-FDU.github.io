@@ -28,7 +28,8 @@ def zoom(page: int, box: list[float], out: str) -> str:
     scale = min(MAX_SCALE, MAX_LONG_SIDE / max(crop.size))
     if scale > 1:
         crop = crop.resize((round(crop.width * scale), round(crop.height * scale)), Image.Resampling.LANCZOS)
-    crop.save(out, "PNG")
+    # JPEG, not PNG: half the bytes, and every crop is re-sent on each later turn.
+    crop.convert("RGB").save(out, "JPEG", quality=92)
     return f"{crop.width}x{crop.height}px, {scale:.1f}x"
 
 

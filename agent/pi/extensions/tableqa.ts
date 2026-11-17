@@ -52,14 +52,14 @@ export default function (pi: ExtensionAPI) {
 			y1: Type.Number({ minimum: 0, maximum: 1000 }),
 		}),
 		async execute(toolCallId, p) {
-			const out = `/tmp/zoom-${toolCallId.replace(/[^\w-]/g, "")}.png`;
+			const out = `/tmp/zoom-${toolCallId.replace(/[^\w-]/g, "")}.jpg`;
 			const box = [p.x0, p.y0, p.x1, p.y1].map(String);
 			const result = helper(["zoom", String(p.page), ...box, out]);
 			if (!result.ok) return { content: [text(`zoom failed: ${result.out}`)], details: {} };
 			return {
 				content: [
 					text(`page ${p.page}, region (${box.join(", ")}), ${result.out}`),
-					{ type: "image", data: readFileSync(out).toString("base64"), mimeType: "image/png" },
+					{ type: "image", data: readFileSync(out).toString("base64"), mimeType: "image/jpeg" },
 				],
 				details: {},
 			};
