@@ -89,8 +89,10 @@ def prepare_materials(path: Path, cache_dir: Path) -> Path:
     return out
 
 
-def task_prompt(question: Question) -> str:
-    return question_prompt(question) + "\n" + SUBMIT_NOTE
+def task_prompt(question: Question, has_text_layer: bool = True) -> str:
+    # pilot: without the note, agents grepped a missing text layer first
+    note = "" if has_text_layer else "\n" + NO_TEXT_NOTE
+    return question_prompt(question) + "\n" + SUBMIT_NOTE + note
 
 
 def read_answers(path: Path) -> dict[str, str]:
@@ -151,9 +153,7 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     task_dir.mkdir(parents=True, exist_ok=True)
-    prompt = task_prompt(question)
-    if not any(doc_dir.glob("page-*.txt")):  # pilot: agents grepped a missing text layer first
-        prompt += "\n" + NO_TEXT_NOTE
+    prompt = task_prompt(question, has_text_layer=any(doc_dir.glob("page-*.txt")))
     (task_dir / "prompt.md").write_text(prompt, encoding="utf-8")
     (task_dir / "question.json").write_text(
         json.dumps({"question_type": question.question_type, "answer_format": question.answer_format}),
