@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "description": "Renders docs/diagrams/*.mmd to SVG with the locally installed Edge (no Chromium download).",
+  "scripts": {
+    "render": "bun render.mjs"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "12.2.0"
+  }
+}

@@ -1,0 +1,33 @@
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 70}}}%%
+%% Components and trust boundaries of the agentic harness.
+flowchart LR
+    subgraph HOST["Host runner"]
+        direction TB
+        prep["Prepare per document<br/><small>page images + PDF text layer</small>"]
+        launch["Launch per question<br/><small>write prompt · N sandboxes in parallel</small>"]
+        collect["Collect<br/><small>re-validate · submission.xlsx · cost report</small>"]
+        prep --> launch
+    end
+
+    subgraph NET["Isolated network · no internet"]
+        agent["Sandbox · pi agent<br/><small>tools: zoom · answer · bash · read · write</small><br/><small>read-only root · no capabilities · 1 CPU · 2 GB</small>"]
+    end
+
+    gw["Model gateway · LiteLLM<br/><small>only host the sandbox can reach</small>"]
+    model["Qwen model API<br/><small>OpenAI-compatible</small>"]
+    trace["Tracing · Arize Phoenix"]
+
+    launch -- "docker run + read-only mounts" --> agent
+    agent -- "answer.json + transcript" --> collect
+    agent -- "model calls" --> gw
+    gw --> model
+    gw -. "spans: metadata + run/question tags" .-> trace
+
+    classDef host fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef box fill:#ecfdf5,stroke:#10b981,color:#064e3b,stroke-width:2px
+    classDef ext fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    class prep,launch,collect host
+    class agent box
+    class gw,model,trace ext
+    style HOST fill:#f8fafc,stroke:#6366f1,stroke-width:2px
+    style NET fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:6 4
