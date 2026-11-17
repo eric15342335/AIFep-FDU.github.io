@@ -47,6 +47,7 @@ class AgentConfig:
     timeout: int = 1800
     max_turns: int = 25
     thinking: str = "high"  # pi level; models.json maps it to Qwen reasoning_effort=xhigh
+    resume: bool = False  # only give capped sessions the grace turn they missed; start nothing new
 
 
 def prepare_materials(path: Path, cache_dir: Path) -> Path:
@@ -99,8 +100,31 @@ def read_answers(path: Path) -> dict[str, str]:
     return {id_key(row["id"]): str(row.get("answer") or "") for row in read_rows(path, {"id", "answer"})}
 
 
+def capped_session(work: Path) -> Path | None:
+    """A saved session that the old hard cap aborted, trimmed so it ends on its last tool result.
+
+    The original stays next to it as `*.capped` (not `*.jsonl`, so stats do not count it twice).
+    """
+    files = list((work / "session").glob("*.jsonl"))
+    if len(files) != 1:
+        return None
+    lines = files[0].read_text(encoding="utf-8").splitlines()
+    last = json.loads(lines[-1]).get("message") or {} if lines else {}
+    if last.get("role") != "assistant" or last.get("stopReason") != "aborted" or last.get("content"):
+        return None
+    files[0].rename(files[0].with_suffix(".capped"))
+    files[0].write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    return files[0]
+
+
 def docker_command(
-    question: Question, config: AgentConfig, doc_dir: Path, task_dir: Path, work: Path, name: str
+    question: Question,
+    config: AgentConfig,
+    doc_dir: Path,
+    task_dir: Path,
+    work: Path,
+    name: str,
+    resume: Path | None = None,
 ) -> list[str]:
     key = id_key(question.id)
     return [
@@ -138,6 +162,7 @@ def docker_command(
         f"AGENT_MAX_TURNS={config.max_turns}",
         "-e",
         f"TABLEQA_TAG=run:{config.name},q:{key}",
+        *(["-e", f"AGENT_RESUME=/work/session/{resume.name}"] if resume else []),
         config.image,
     ]
 
@@ -150,8 +175,14 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
         if cached.get("status") in ("ok", "empty"):
             return {**cached, "cached": True}
     task_dir, work = run_dir / "tasks" / key, run_dir / "work" / key
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
+    resume = None
+    if config.resume:
+        resume = capped_session(work)
+        if resume is None:
+            return {"id": question.id, "status": "skipped", "answer": "", "cached": True}
+    else:
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir(parents=True)
     task_dir.mkdir(parents=True, exist_ok=True)
     prompt = task_prompt(question, has_text_layer=any(doc_dir.glob("page-*.txt")))
     (task_dir / "prompt.md").write_text(prompt, encoding="utf-8")
@@ -170,9 +201,12 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     }
     started = time.monotonic()
     # Stream to files, not host memory: the sandbox controls how much it prints.
-    with (work / "stdout.txt").open("wb") as stdout, (work / "stderr.txt").open("wb") as stderr:
+    log = "-resume" if resume else ""
+    with (work / f"stdout{log}.txt").open("wb") as stdout, (work / f"stderr{log}.txt").open("wb") as stderr:
         process = await asyncio.create_subprocess_exec(
-            *docker_command(question, config, doc_dir, task_dir, work, name), stdout=stdout, stderr=stderr
+            *docker_command(question, config, doc_dir, task_dir, work, name, resume),
+            stdout=stdout,
+            stderr=stderr,
         )
         try:
             result["exit_code"] = await asyncio.wait_for(process.wait(), config.timeout)
@@ -194,7 +228,7 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
             result["error"] = f"host validation: {exc}"
     elif result["status"] != "timeout":
         result["status"] = "no_answer"
-        result["error"] = (work / "stderr.txt").read_bytes()[-2000:].decode("utf-8", "replace")
+        result["error"] = (work / f"stderr{log}.txt").read_bytes()[-2000:].decode("utf-8", "replace")
     result.update(session_stats(work / "session"))
     atomic_json(record_path, result)
     return result

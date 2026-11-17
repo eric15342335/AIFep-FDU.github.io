@@ -48,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     run.add_argument("--limit", type=positive, help="first N questions only")
     run.add_argument("--ids", help="comma-separated question ids")
+    run.add_argument("--resume", action="store_true", help="give turn-capped sessions their grace turn only")
 
     args = parser.parse_args(argv)
     model = os.getenv("AGENT_MODEL", "")
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         max_turns=args.max_turns,
         thinking=args.thinking,
+        resume=args.resume,
     )
     report = asyncio.run(agent.run(questions, selected, args.files, args.output_dir, config, fallback))
     report["fallback"] = str(args.fallback) if args.fallback else None

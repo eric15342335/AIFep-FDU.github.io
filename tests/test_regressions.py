@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from tableqa.agent import NO_TEXT_NOTE, prepare_materials, task_prompt
+from tableqa.agent import NO_TEXT_NOTE, capped_session, prepare_materials, task_prompt
 from tableqa.xlsxio import Question
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,3 +82,29 @@ def test_phoenix_message_bodies_stay_off():
     # batches over the 64 MB OTLP limit.
     gateway = (ROOT / "agent/litellm.yaml").read_text(encoding="utf-8")
     assert re.search(r"^\s*turn_off_message_logging:\s*true\s*$", gateway, re.M)
+
+
+def test_turn_cap_gives_one_answer_only_grace_turn_after_the_last_regular_turn():
+    # Full run: q687, q689, q699 used all 25 turns and were aborted without answering.
+    # The grace turn must start only at the cap, so sessions that answered earlier are unchanged.
+    ext = (ROOT / "agent/pi/extensions/tableqa.ts").read_text(encoding="utf-8")
+    assert re.search(r"turns === MAX_TURNS\)\s*\{\s*pi\.setActiveTools\(\[\"answer\"\]\)", ext)
+    assert "else if (turns > MAX_TURNS) ctx.abort()" in ext
+    assert (ROOT / "agent/pi/grace.md").read_text(encoding="utf-8").strip()
+
+
+def test_capped_session_is_trimmed_to_its_last_tool_result(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    entries = [
+        {"type": "message", "message": {"role": "assistant", "stopReason": "toolUse", "content": [{}]}},
+        {"type": "message", "message": {"role": "toolResult", "toolName": "bash", "content": [{}]}},
+        {"type": "message", "message": {"role": "assistant", "stopReason": "aborted", "content": []}},
+    ]
+    path = session / "s.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    assert capped_session(tmp_path) == path
+    roles = [json.loads(x)["message"]["role"] for x in path.read_text().splitlines()]
+    assert roles == ["assistant", "toolResult"]
+    assert len((session / "s.capped").read_text().splitlines()) == 3  # original kept for audit
+    assert capped_session(tmp_path) is None  # already trimmed: nothing to resume twice
