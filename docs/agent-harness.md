@@ -92,7 +92,7 @@ Statuses: `ok` (validated answer), `empty` (agent submitted an empty answer), `n
 
 ## Observability
 
-Phoenix gets one span per model call with latency, token counts, errors and the tag `run:<name>,q:<id>` (filter on `metadata.requester_metadata.headers.x-litellm-tags`). Message bodies are off (`turn_off_message_logging` in `agent/litellm.yaml`): with them on, each span carries every base64 image, about 3 MB per call. Full transcripts are the pi session files; `pi --export <file>` turns one into HTML.
+Phoenix gets one span per model call with latency, token counts, errors and the tag `run:<name>,q:<id>` (filter on `metadata.requester_metadata.headers.x-litellm-tags`). Message bodies are on (`turn_off_message_logging: false` in `agent/litellm.yaml`), base64 images included: 1–2 MB per call, a few GB per full run. Set it to `true` to keep only latency, tokens, tags and errors. Full transcripts are the pi session files; `pi --export <file>` turns one into HTML.
 
 ## Offline check (no model needed)
 
