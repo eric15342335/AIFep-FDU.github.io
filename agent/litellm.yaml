@@ -1,5 +1,5 @@
 # Pass every model name through to the OpenAI-compatible upstream; log every call to Phoenix.
-# hosted_vllm is LiteLLM's generic self-managed provider; it forwards chat_template_kwargs.
+# LiteLLM's hosted_vllm provider is used because it forwards chat_template_kwargs to the Qwen model API.
 model_list:
   - model_name: "*"
     litellm_params:

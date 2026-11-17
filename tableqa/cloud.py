@@ -22,7 +22,7 @@ class StopRun(CloudError):
 def validate_endpoint(base_url: str, model: str, custom: bool = False) -> str:
     parsed = urlsplit(base_url)
     if custom:
-        # Self-managed OpenAI-compatible endpoint (reached through the LiteLLM gateway).
+        # Custom OpenAI-compatible Qwen model API (reached through the LiteLLM gateway).
         if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username
                 or parsed.password or parsed.query or parsed.fragment
                 or not parsed.path.rstrip("/").endswith("/v1")):

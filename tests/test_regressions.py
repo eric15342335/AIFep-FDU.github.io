@@ -69,7 +69,7 @@ def test_array_answer_with_null_calculation_index_is_rejected_with_reason():
 
 
 def test_pi_waits_as_long_as_the_gateway():
-    # Pilot over a slow tunnel: pi's default 300 s idle timeout aborted uploads the gateway
+    # Pilot over a slow network link: pi's default 300 s idle timeout aborted uploads the gateway
     # (900 s) was still serving, and each retry re-sent megabytes of images.
     settings = json.loads((ROOT / "agent/pi/settings.json").read_text(encoding="utf-8"))
     gateway = (ROOT / "agent/litellm.yaml").read_text(encoding="utf-8")
