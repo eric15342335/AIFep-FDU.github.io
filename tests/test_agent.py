@@ -1,0 +1,70 @@
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+from tableqa.agent import prepare_materials, session_stats, task_prompt
+from tableqa.xlsxio import Question
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("sandbox_tools", ROOT / "agent" / "tools.py")
+assert spec and spec.loader
+tools = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tools)
+
+
+def question(**kw):
+    base = dict(
+        id="1",
+        file_name="001.pdf",
+        question_type="extract",
+        question="Q 001.pdf",
+        table_hint="",
+        answer_format="number",
+    )
+    return Question(**(base | kw))
+
+
+def test_task_prompt_hides_file_name_and_asks_for_answer_tool():
+    text = task_prompt(question())
+    assert "001.pdf" not in text
+    assert "answer 工具" in text
+
+
+def test_prepare_materials_text_layer(tmp_path):
+    out = prepare_materials(ROOT / "data/files/006.pdf", tmp_path)
+    assert (out / "page-0001.jpg").is_file() and (out / "page-0001.txt").read_text(encoding="utf-8")
+    words = json.loads((out / "words-0001.json").read_text(encoding="utf-8"))
+    assert words and all(0 <= v <= 1000 for w in words for v in w["box"])
+    assert prepare_materials(ROOT / "data/files/006.pdf", tmp_path) == out  # cached
+
+
+def test_session_stats(tmp_path):
+    lines = [
+        {"type": "message", "message": {"role": "assistant", "usage": {"input": 10, "output": 2}}},
+        {"type": "message", "message": {"role": "toolResult", "toolName": "zoom"}},
+        {"type": "message", "message": {"role": "toolResult", "toolName": "zoom"}},
+    ]
+    (tmp_path / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines), encoding="utf-8")
+    stats = session_stats(tmp_path)
+    assert stats["turns"] == 1 and stats["tools"] == {"zoom": 2} and stats["usage"]["input"] == 10
+
+
+def test_sandbox_check_uses_baseline_validator():
+    assert tools.check("extract", "number", '{"answer": "1,250"}') == "1250"
+    with pytest.raises(ValueError):
+        tools.check("extract", "json_array", '{"answer": 5}')
+
+
+def test_sandbox_zoom(tmp_path, monkeypatch):
+    page = tmp_path / "page-0001.jpg"
+    Image.new("RGB", (1000, 800), "white").save(page)
+    monkeypatch.setattr(tools, "Path", lambda p: page if "page-0001" in p else Path(p))
+    info = tools.zoom(1, [0, 0, 250, 250], str(tmp_path / "z.png"))
+    with Image.open(tmp_path / "z.png") as crop:
+        assert max(crop.size) == 1000  # 250x200 crop, capped at 4x
+    assert info.startswith("1000x800")
+    with pytest.raises(ValueError):
+        tools.zoom(1, [10, 10, 12, 12], str(tmp_path / "bad.png"))
