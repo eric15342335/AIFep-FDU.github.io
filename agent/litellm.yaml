@@ -13,8 +13,9 @@ general_settings:
 
 litellm_settings:
   callbacks: ["arize_phoenix"]
-  # Full message bodies in Phoenix, base64 images included (1-2 MB per call, a few GB per
-  # full run, stored uncompressed). Set to true to keep only latency, tokens, tags and errors.
-  turn_off_message_logging: false
+  # Message bodies off: every call carries base64 images (1-2 MB), and at 32 workers Phoenix
+  # pinned a CPU and LiteLLM dropped span batches over the 64 MB export limit. Phoenix keeps
+  # latency, tokens, tags and errors; transcripts are in runs/<name>/work/<id>/session.
+  turn_off_message_logging: true
   drop_params: false
   request_timeout: 900
