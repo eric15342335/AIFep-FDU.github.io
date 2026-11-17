@@ -6,6 +6,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 const MAX_TURNS = Number(process.env.AGENT_MAX_TURNS ?? 25);
+const GRACE = readFileSync(`${process.env.PI_CODING_AGENT_DIR}/grace.md`, "utf8").trim();
 const task = JSON.parse(readFileSync("/task/q/question.json", "utf8")) as {
 	question_type: string;
 	answer_format: string;
@@ -31,10 +32,14 @@ export default function (pi: ExtensionAPI) {
 	let turns = 0;
 	let emptyRejected = false;
 
-	// Hard turn cap: the runner falls back to the baseline answer when no answer.json exists.
+	// Turn cap. Reaching it buys one grace turn with only `answer` available, so the work is not lost.
+	// It fires only after the last regular turn: sessions that answer within MAX_TURNS never see it.
 	pi.on("turn_end", async (_event, ctx) => {
 		turns += 1;
-		if (turns >= MAX_TURNS) ctx.abort();
+		if (turns === MAX_TURNS) {
+			pi.setActiveTools(["answer"]);
+			pi.sendUserMessage(GRACE, { deliverAs: "steer" });
+		} else if (turns > MAX_TURNS) ctx.abort();
 	});
 
 	pi.registerTool({
