@@ -50,7 +50,10 @@ def main(argv=None):
     command.add_argument("--output-dir", type=Path, default=Path("runs/qwen3_8_flash"))
     command.add_argument("--base-url", default=os.getenv("DASHSCOPE_BASE_URL", ""),
                          help="百炼 compatible-mode/v1 地址，或环境变量 DASHSCOPE_BASE_URL")
-    command.set_defaults(model="qwen3.8-flash")
+    command.add_argument("--model", default="qwen3.8-flash")
+    command.add_argument("--custom-endpoint", action="store_true",
+                         help="自建 OpenAI 兼容服务，不校验阿里云域名，无需 API Key")
+    command.add_argument("--thinking", action="store_true", help="开启模型思考模式，自建服务时使用最高强度 xhigh（默认关闭）")
     command.add_argument("--workers", type=positive, default=2)
     command.add_argument("--dpi", type=positive, default=180)
     command.add_argument("--max-side", type=positive, default=2400)
@@ -91,7 +94,8 @@ def main(argv=None):
             config = Config(**{field.name: getattr(args, field.name) for field in fields(Config)})
             client = QwenClient(os.getenv("DASHSCOPE_API_KEY", ""), args.base_url, args.model,
                                 timeout=args.timeout, retries=args.api_retries,
-                                max_requests=args.max_requests)
+                                max_requests=args.max_requests, custom=args.custom_endpoint,
+                                thinking=args.thinking)
             report = run(questions, args.files, args.output_dir, config, client,
                          limit=args.limit, refresh=args.refresh, recovery_attempts=args.recovery_attempts,
                          recovery_first=args.recovery_first)

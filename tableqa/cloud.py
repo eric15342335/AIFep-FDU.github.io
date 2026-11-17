@@ -19,8 +19,15 @@ class StopRun(CloudError):
     """Authentication, endpoint configuration or explicit request budget failure."""
 
 
-def validate_endpoint(base_url: str, model: str) -> str:
+def validate_endpoint(base_url: str, model: str, custom: bool = False) -> str:
     parsed = urlsplit(base_url)
+    if custom:
+        # Self-managed OpenAI-compatible endpoint (reached through the LiteLLM gateway).
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("--custom-endpoint 需要 http(s)://host[:port]/v1 形式的地址")
+        if not model.lower().startswith("qwen"):
+            raise ValueError("只允许千问系列模型")
+        return base_url.rstrip("/")
     host = (parsed.hostname or "").lower()
     allowed = host == "dashscope.aliyuncs.com" or (
         host.endswith(".aliyuncs.com") and (host.startswith("dashscope-") or ".maas." in host))
@@ -40,9 +47,10 @@ class NoRedirect(HTTPRedirectHandler):
 
 class QwenClient:
     def __init__(self, api_key: str, base_url: str, model: str, *, timeout: int = 180,
-                 retries: int = 3, max_requests: int = 2000):
-        self.base_url = validate_endpoint(base_url, model)
-        if not api_key:
+                 retries: int = 3, max_requests: int = 2000, custom: bool = False, thinking: bool = False):
+        self.base_url = validate_endpoint(base_url, model, custom)
+        self.custom, self.thinking = custom, thinking
+        if not api_key and not custom:
             raise ValueError("未设置 DASHSCOPE_API_KEY，请在当前运行环境中配置")
         self.api_key, self.model = api_key, model
         self.timeout, self.retries, self.max_requests = timeout, retries, max_requests
@@ -53,7 +61,15 @@ class QwenClient:
 
     def complete(self, messages: list[dict], max_tokens: int, *, json_mode: bool = True) -> dict:
         payload = {"model": self.model, "messages": messages, "temperature": 0,
-                   "max_tokens": max_tokens, "stream": False, "enable_thinking": False}
+                   "max_tokens": max_tokens, "stream": False, "enable_thinking": self.thinking}
+        if self.custom:
+            # OpenAI-compatible servers read the switch from the chat template, not a top-level field.
+            del payload["enable_thinking"]
+            payload["chat_template_kwargs"] = {"enable_thinking": self.thinking}
+            if self.thinking:
+                # Max effort; model card sampling for thinking mode (greedy decoding can loop).
+                payload["chat_template_kwargs"]["reasoning_effort"] = "xhigh"
+                payload.update(temperature=1.0, top_p=0.95, top_k=20)
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -67,9 +83,10 @@ class QwenClient:
                     self.stopped.set()
                     raise StopRun(f"达到 --max-requests={self.max_requests}，已停止后续请求")
                 self.request_count += 1
-            request = Request(self.base_url + "/chat/completions", data=body, headers={
-                "Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"},
-                method="POST")
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["Authorization"] = "Bearer " + self.api_key
+            request = Request(self.base_url + "/chat/completions", data=body, headers=headers, method="POST")
             delay = min(20, 2 ** attempt) + random.random()
             try:
                 # Redirects are deliberately not followed with an Authorization header.
