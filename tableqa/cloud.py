@@ -23,7 +23,9 @@ def validate_endpoint(base_url: str, model: str, custom: bool = False) -> str:
     parsed = urlsplit(base_url)
     if custom:
         # Self-managed OpenAI-compatible endpoint (reached through the LiteLLM gateway).
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username
+                or parsed.password or parsed.query or parsed.fragment
+                or not parsed.path.rstrip("/").endswith("/v1")):
             raise ValueError("--custom-endpoint 需要 http(s)://host[:port]/v1 形式的地址")
         if not model.lower().startswith("qwen"):
             raise ValueError("只允许千问系列模型")
@@ -52,7 +54,8 @@ class QwenClient:
         self.custom, self.thinking = custom, thinking
         if not api_key and not custom:
             raise ValueError("未设置 DASHSCOPE_API_KEY，请在当前运行环境中配置")
-        self.api_key, self.model = api_key, model
+        # Never forward the DashScope key to a custom endpoint.
+        self.api_key, self.model = ("" if custom else api_key), model
         self.timeout, self.retries, self.max_requests = timeout, retries, max_requests
         self.request_count = 0
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
