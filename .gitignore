@@ -11,3 +11,4 @@ runs/
 demo_run/
 *.pem
 *.key
+node_modules/

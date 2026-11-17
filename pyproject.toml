@@ -1,0 +1,35 @@
+[project]
+name = "tableqa"
+version = "0.2.0"
+description = "Qwen table recognition baseline and agentic harness experiment"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl==3.1.5",
+    "Pillow==12.3.0",
+    "PyMuPDF==1.28.2",
+]
+
+[dependency-groups]
+dev = ["ruff", "mypy", "pytest"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # full-width Chinese punctuation in prompts is intended
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+files = ["tableqa/agent.py", "tableqa/smoke.py", "agent.py"]
+follow_imports = "silent"  # baseline modules predate typing; check only the new code
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
