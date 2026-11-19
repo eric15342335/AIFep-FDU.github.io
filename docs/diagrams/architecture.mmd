@@ -27,12 +27,12 @@ flowchart TB
             out["<b>6. Write the results</b><br/>submission.xlsx (baseline Excel<br/>writer) and a cost report"]
             check --> retry --> out
         end
-        ROW1 -- "step 4 starts when a container exits and leaves answer.json" --> ROW2
+        ROW1 -- "step 4 starts when a container exits or is stopped after 30 minutes" --> ROW2
     end
 
     subgraph BOX["<b>Sandbox container</b>, one per question, no internet"]
         direction LR
-        input[("<b>Input folder, read only</b><br/>page images, text layer,<br/>the question's task")]
+        input[("<b>Input folders, read only</b><br/>the document (page images,<br/>text layer) and the task")]
         agent["<b>AI agent (pi, an open-source<br/>coding agent)</b><br/>tools: zoom (crop and enlarge a page<br/>area), answer (check with a copy of the<br/>baseline checker, then save and stop), run<br/>commands (bash), read and write files"]
         output[("<b>Output folder, writable</b><br/>answer.json and the<br/>full conversation")]
         input --> agent --> output
@@ -42,7 +42,7 @@ flowchart TB
         direction LR
         gw["<b>Model gateway (LiteLLM)</b><br/>the only address a sandbox can<br/>reach; adds the API key, so the<br/>key never enters a sandbox"]
         model["<b>Alibaba Cloud Bailian</b><br/>qwen3.8-flash<br/>(or a local test server)"]
-        trace["<b>Phoenix</b><br/>a log of every model call:<br/>time, tokens and messages,<br/>labelled with run and question"]
+        trace["<b>Phoenix</b><br/>a log of the model calls:<br/>time, tokens and (optional)<br/>messages,<br/>labelled with run and question"]
         gw -- "forwards the call" --> model
         gw -. "logs a copy" .-> trace
     end
@@ -53,7 +53,7 @@ flowchart TB
     end
 
     BASE -- "reused by steps 1, 2, 4 and 6" --> HOST
-    HOST -- "step 3: one container per question, sharing two folders" --> BOX
+    HOST -- "step 3: one container per question, with its input and output folders" --> BOX
     BOX -- "model calls, the only way out" --> SVC
     SVC ~~~ KEY
 

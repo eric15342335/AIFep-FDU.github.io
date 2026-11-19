@@ -13,7 +13,7 @@ flowchart TB
         lookup{"Already answered<br/>in this folder?"}
         reuse(["Reuse it; nothing is paid twice"])
         gate{"Have 8 questions<br/>failed in a row?"}
-        skip(["Do not start it: the API key,<br/>the quota or the service is<br/>probably broken"])
+        skip(["Skip it (not_started): the API key,<br/>the quota or the service is<br/>probably broken"])
         session(["Run the question in its own<br/>sandbox (see the state diagram<br/>for one question)"])
         lookup -- "yes (also an answer saved<br/>before an interruption)" --> reuse
         lookup -- "no" --> gate
@@ -22,7 +22,7 @@ flowchart TB
     end
 
     ANSWER --> write(["Write submission.xlsx<br/>and a cost report"])
-    write --> more{"First pass, some questions<br/>without an answer, and no<br/>stop after 8 failures?"}
+    write --> more{"First pass, some questions<br/>without an answer, and none<br/>skipped by the 8-failure stop?"}
     more -- "yes: retry pass,<br/>only those questions" --> ANSWER
     more -- "no" --> done(("end"))
     ANSWER -. "run interrupted: stopped, crashed or power cut" .-> again(["Run the same command again"])

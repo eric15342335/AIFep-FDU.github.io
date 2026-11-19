@@ -30,7 +30,7 @@ Compared with a separate OCR model such as PaddleOCR: for PDFs with a text layer
   - `zoom(page, x0, y0, x1, y1)` in 0-1000 coordinates, returns the enlarged crop as an image;
   - `answer(answer, calculations)` validates with the baseline's `normalize_response`, writes `answer.json`, ends the session.
 - **Prompt:** the baseline's prompt for the question type (`tableqa/prompts.py`), plus a short note on the tools and on submitting through `answer`.
-- **Limits:** 25 turns, 30 minutes per question, maximum reasoning effort.
+- **Limits:** 25 regular turns plus one answer-only turn, 30 minutes per question, maximum reasoning effort.
 - **Model:** `qwen3.8-flash` on Alibaba Cloud Bailian for the real run. During development, the same harness ran against the open-weight Qwen3.8-Flash-Next model on a local vLLM server, which costs nothing per call.
 - **Collection:** the host re-validates `answer.json` and writes `submission.xlsx`. A question without a valid answer stays empty.
 - **Observability:** every model call goes through LiteLLM and is traced in Phoenix (tokens, latency, run/question tags). Full transcripts are kept per question.
@@ -58,7 +58,7 @@ Guess, wide error bars: +2 to +6 points over one-shot, mostly on text-layer PDFs
 Risks:
 
 1. **Tool-calling reliability** of the model (malformed or quoted tool calls, loops). Mitigated by the turn cap, the `answer` validator and host re-validation.
-2. **No `answer` call:** if the model ends with plain text, the question stays empty.
+2. **No `answer` call:** if the model ends with plain text, it is reminded once in the same session; if it stops again, the question stays empty.
 3. **Images in tool results** must reach the model; `agent.py smoke` checks this before any run.
 4. **Cost:** an agent session uses many more tokens than one request. Recorded and reported, not hidden.
 5. **Context growth:** every zoom adds an image, so the model API must accept about 30 images per request (`smoke` checks this).

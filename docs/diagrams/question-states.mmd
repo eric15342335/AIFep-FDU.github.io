@@ -15,19 +15,24 @@ flowchart TB
         grace(["Last turn: only the answer<br/>tool is left"])
         saved(["Save answer.json<br/>and end the session"])
         noanswer(["End without an answer"])
+        empty{"First empty<br/>answer?"}
+        cap{"25 turns<br/>used?"}
         start --> turn --> what
         what -- "called zoom, bash,<br/>read or write" --> tool
         what -- "called answer" --> check
         what -- "stopped without<br/>calling answer" --> again
-        check -- "accepted" --> saved
+        check -- "valid" --> empty
+        empty -- "no" --> saved
         again -- "yes" --> remind
         again -- "no" --> noanswer
         grace -- "answer accepted<br/>by the checker" --> saved
         grace -- "no valid answer" --> noanswer
-        tool -.-> turn
-        tool -. "turn 25 ended" .-> grace
-        remind -.-> turn
-        check -. "rejected: wrong format,<br/>or first empty answer" .-> turn
+        tool --> cap
+        remind --> cap
+        check -- "rejected: wrong format,<br/>with the reason" --> cap
+        empty -- "yes: refused once" --> cap
+        cap -. "no: next turn" .-> turn
+        cap -- "yes" --> grace
     end
 
     timeout(["30 minutes have passed:<br/>the host stops the container"])
@@ -37,8 +42,9 @@ flowchart TB
     noanswer --> hostcheck
     timeout --> hostcheck
     record(["Save the record: ok, empty,<br/>no_answer, timeout or failed"])
-    hostcheck -- "accepted, or no answer" --> record
-    hostcheck -- "rejected: failed" --> record
+    hostcheck -- "valid file: ok or empty" --> record
+    hostcheck -- "no file: no_answer<br/>or timeout" --> record
+    hostcheck -- "invalid file: failed" --> record
 
     classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
     classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3
@@ -48,6 +54,6 @@ flowchart TB
     class check base
     class hostcheck usesBase
     class record ours
-    class start,turn,what,tool,again,remind,grace,saved agent
+    class start,turn,what,tool,again,remind,grace,saved,empty,cap agent
     class timeout,noanswer bad
     style SESSION fill:#f8fafc,stroke:#10b981,stroke-width:3px

@@ -118,7 +118,7 @@ Bailian also offers an explicit cache with `cache_control` markers. The harness 
 
 ## Watching a run
 
-Open Phoenix at http://127.0.0.1:6006 and choose the project. The project is `tableqa-agent` unless the env file sets another name with `PHOENIX_PROJECT`, for example `export PHOENIX_PROJECT='tableqa-bailian'`, which keeps the Bailian run apart from local test runs. Every model call appears there while the run is going, with the full messages, token counts, latency and errors. Each call is tagged `run:<name>,q:<question id>`.
+Open Phoenix at http://127.0.0.1:6006 and choose the project. The project is `tableqa-agent` unless the env file sets another name with `PHOENIX_PROJECT`, for example `export PHOENIX_PROJECT='tableqa-bailian'`, which keeps the Bailian run apart from local test runs. Model calls appear there while the run is going, with token counts, latency, errors and (unless hidden, see below) the full messages. Each call is tagged `run:<name>,q:<question id>`.
 
 Each call carries base64 page images of 1 to 2 MB. In an earlier run with 32 parallel containers, Phoenix fell behind and LiteLLM dropped some traces. If that happens, the run itself is not affected, because the complete record of every session is saved on disk in `runs/<name>/work/<id>/session/`.
 
@@ -135,7 +135,7 @@ Everything for a run is in `runs/<name>/`:
 - `records/<id>.json` holds one question's answer, status, time, turns, tool counts and token usage.
 - `work/<id>/session/*.jsonl` is the full agent transcript. `stdout.txt`, `stderr.txt` and `answer.json` are next to it.
 
-A question ends with one of these statuses: `ok` (a validated answer), `empty` (the agent decided the answer is empty), `no_answer` (the session ended without calling `answer`), `timeout`, `failed`, or `not_started` (skipped after 8 failures in a row). Questions without an answer stay empty in the submission. With `--fallback submission.xlsx`, they are filled from another submission, such as the baseline's.
+A question ends with one of these statuses: `ok` (a validated answer), `empty` (the agent decided the answer is empty), `no_answer` (the session ended without an accepted answer), `timeout`, `failed`, or `not_started` (skipped after 8 failures in a row). Questions without an answer stay empty in the submission. With `--fallback submission.xlsx`, they are filled from another submission, such as the baseline's.
 
 ## Results
 
