@@ -1,16 +1,23 @@
 [project]
 name = "tableqa"
-version = "0.2.0"
+version = "1.0.0"
 description = "Qwen table recognition baseline and agentic harness experiment"
 requires-python = ">=3.11"
 dependencies = [
+    "openai==3.55.1",
     "openpyxl==3.1.5",
     "Pillow==12.3.0",
     "PyMuPDF==1.28.2",
+    "python-dotenv==1.2.4",
 ]
 
 [dependency-groups]
-dev = ["ruff", "mypy", "pytest"]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
+    "pyyaml>=6.0.3",
+]
 
 [tool.uv]
 package = false

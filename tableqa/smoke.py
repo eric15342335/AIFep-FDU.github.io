@@ -7,10 +7,10 @@ import io
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, ClassVar
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from typing import Any, ClassVar, cast
 
+import openai
+from openai.types.chat import ChatCompletionMessageParam
 from PIL import Image, ImageDraw
 
 ZOOM_TOOL = {
@@ -33,20 +33,6 @@ ZOOM_TOOL = {
 }
 
 
-def post(base_url: str, path: str, payload: dict[str, Any], timeout: int = 300) -> dict[str, Any]:
-    request = Request(
-        base_url.rstrip("/") + path,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            return json.load(response)
-    except HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code}: {exc.read(600).decode('utf-8', 'replace')}") from exc
-
-
 def image_part(image: Image.Image) -> dict[str, Any]:
     buffer = io.BytesIO()
     image.save(buffer, "PNG")
@@ -67,20 +53,36 @@ class Endpoint:
 
     # Bailian's OpenAI-compatible fields, top level (the same ones pi sends; see agent/pi/models.json).
     THINKING_OFF: ClassVar[dict[str, Any]] = {"enable_thinking": False}
+    # Fields the OpenAI SDK knows; every other field (the Bailian ones) goes into the request body as is.
+    STANDARD: ClassVar[set[str]] = {
+        "max_tokens",
+        "temperature",
+        "tools",
+        "tool_choice",
+        "response_format",
+        "reasoning_effort",
+    }
 
     def __init__(self, base_url: str, model: str, page: Path) -> None:
-        self.base_url, self.model, self.page = base_url, model, page
+        self.model, self.page = model, page
+        # The gateway needs no key (see agent/litellm.yaml); the SDK insists on one, so pass a placeholder.
+        # No retries: a check that only passes on the second try should show up as a failure.
+        self.client = openai.OpenAI(base_url=base_url, api_key="none", timeout=300, max_retries=0)
 
     def call(self, messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": 2048,
-            "temperature": 0,
-            **self.THINKING_OFF,
-            **extra,
-        }
-        return post(self.base_url, "/chat/completions", payload)
+        fields = {"max_tokens": 2048, "temperature": 0, **self.THINKING_OFF, **extra}
+        known = {k: v for k, v in fields.items() if k in self.STANDARD}
+        others = {k: v for k, v in fields.items() if k not in self.STANDARD}
+        reply = self.client.chat.completions.with_raw_response.create(
+            model=self.model,
+            # The checks send DashScope extensions (a per-image max_pixels) that the SDK's types do not list.
+            messages=cast(list[ChatCompletionMessageParam], messages),
+            extra_body=others,
+            **known,
+        )
+        # The reply as the server sent it, including fields the SDK does not model (reasoning_content).
+        # A reply that is not JSON raises ValueError, which marks the check as failed.
+        return reply.http_response.json()
 
     def chat(self, messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
         return self.call(messages, **extra)["choices"][0]["message"]
@@ -215,7 +217,7 @@ class Endpoint:
         message = [{"role": "user", "content": f"Table:\n{rows}\nReply with exactly: OK"}]
         first = self.call(message, max_tokens=8)["usage"]
         second = self.call(message, max_tokens=8)["usage"]
-        cached = (second.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+        cached = (second.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
         return f"prompt tokens {first['prompt_tokens']}, cached on repeat {cached}"
 
     def run_all(self) -> list[tuple[str, bool, str]]:
@@ -235,7 +237,7 @@ class Endpoint:
         for name, check in checks:
             try:
                 results.append((name, True, check()[:120]))
-            except (AssertionError, RuntimeError, URLError, TimeoutError, KeyError, ValueError) as exc:
+            except (AssertionError, openai.OpenAIError, KeyError, TypeError, ValueError) as exc:
                 results.append((name, False, str(exc)[:300]))
         return results
 

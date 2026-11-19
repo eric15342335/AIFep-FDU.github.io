@@ -18,51 +18,28 @@ import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
-from urllib.error import URLError
 from urllib.parse import urlsplit
-from urllib.request import urlopen
+
+from dotenv import load_dotenv
 
 from tableqa import agent, smoke
 from tableqa.schema import json_loads
 from tableqa.xlsxio import id_key, read_questions
 
 ROOT = Path(__file__).resolve().parent
-GATEWAY = "http://127.0.0.1:4000/v1"
-IMAGE = "tableqa-agent:dev"
-
-
-def load_env(path: Path) -> None:
-    """Read `KEY=value` lines from a .env file. Variables already set in the shell take priority."""
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.removeprefix("export ").split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+GATEWAY = "http://127.0.0.1:4000/v1"  # the port compose.yaml publishes; tests/test_config.py checks it
 
 
 def start_services(image: str) -> None:
-    """Build the sandbox image and start the gateway, then wait until the gateway answers."""
+    """Build the sandbox image and start the gateway, then wait until its health check passes."""
     # Always rebuild: the image contains the pi configuration, so a stale image would run old settings.
     subprocess.run(
         ["docker", "build", "-q", "-f", "agent/Dockerfile", "-t", image, "."], cwd=ROOT, check=True
     )
-    subprocess.run(["docker", "compose", "-f", "agent/compose.yaml", "up", "-d"], cwd=ROOT, check=True)
-    deadline = time.monotonic() + 120
-    while True:
-        try:
-            with urlopen(GATEWAY.removesuffix("/v1") + "/health/liveliness", timeout=5):
-                return
-        except (URLError, OSError):
-            if time.monotonic() > deadline:
-                raise SystemExit(
-                    "The LiteLLM gateway did not start; see `docker compose -f agent/compose.yaml logs`"
-                ) from None
-            time.sleep(2)
+    compose = ["docker", "compose", "-f", "agent/compose.yaml", "up", "-d", "--wait", "--wait-timeout", "120"]
+    if subprocess.run(compose, cwd=ROOT, check=False).returncode:
+        raise SystemExit("The LiteLLM gateway did not start; see `docker compose -f agent/compose.yaml logs`")
 
 
 def positive(value: str) -> int:
@@ -95,12 +72,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--files", type=Path, default=ROOT / "data/files")
     run.add_argument("--output-dir", type=Path, default=ROOT / "runs")
     run.add_argument("--fallback", type=Path, help="submission whose answers fill questions the agent missed")
-    run.add_argument("--image", default=IMAGE)
-    run.add_argument("--workers", type=positive, default=16)
-    run.add_argument("--timeout", type=positive, default=1800, help="seconds per question")
-    run.add_argument("--max-turns", type=positive, default=25)
+    # The defaults live in AgentConfig, so the command line and the runner cannot disagree.
+    run.add_argument("--image", default=agent.AgentConfig.image)
+    run.add_argument("--workers", type=positive, default=agent.AgentConfig.workers)
     run.add_argument(
-        "--thinking", choices=["off", "high"], default="high", help="high = Qwen reasoning_effort xhigh (max)"
+        "--timeout", type=positive, default=agent.AgentConfig.timeout, help="seconds per question"
+    )
+    run.add_argument("--max-turns", type=positive, default=agent.AgentConfig.max_turns)
+    run.add_argument(
+        "--thinking",
+        choices=["off", "high"],
+        default=agent.AgentConfig.thinking,
+        help="high = Qwen reasoning_effort xhigh (max)",
     )
     run.add_argument("--limit", type=positive, help="first N questions only")
     run.add_argument("--ids", help="comma-separated question ids")
@@ -161,7 +144,10 @@ def run_command(args: argparse.Namespace, model: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    load_env(args.env_file)
+    # Variables already set in the shell take priority; values are used literally, without `${...}` expansion.
+    load_dotenv(args.env_file, override=False, interpolate=False)
+    if os.getenv("LITELLM_CONFIG"):
+        parser.error("LITELLM_CONFIG was replaced by PHOENIX_HIDE_MESSAGES='true'; update the env file")
     model = os.getenv("AGENT_MODEL", "")
     if not model:
         parser.error(f"AGENT_MODEL is not set; copy .env.example to {args.env_file} and fill it in")
@@ -170,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         # Fine for development, but the competition only accepts answers from Alibaba Cloud's Qwen models.
         print(f"Note: {base_url or 'DASHSCOPE_BASE_URL'} is not an Alibaba Cloud endpoint: for testing only.")
     if not args.no_setup:
-        start_services(getattr(args, "image", IMAGE))
+        start_services(getattr(args, "image", agent.AgentConfig.image))
     return smoke_command(args, model) if args.command == "smoke" else run_command(args, model)
 
 
