@@ -19,11 +19,12 @@ if (!executablePath) throw new Error("No Chrome/Edge found; set REPORT_BROWSER t
 
 const css = `
 @page { size: A4; margin: 13mm 15mm; }
-body { font-family: "Noto Serif SC", "Source Han Serif SC", "SimSun", serif; font-size: 9.6pt; line-height: 1.55; color: #111; }
-h1, h2, strong, th { font-family: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif; }
+body { font-family: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif; font-size: 9.6pt; line-height: 1.55; color: #1a1a1a; }
+strong, th { font-weight: 700; }
 h1 { font-size: 15pt; margin: 0 0 4pt; text-align: center; }
 h2 { font-size: 11pt; margin: 8pt 0 3pt; break-after: avoid; }
-p { margin: 3pt 0; text-align: justify; }
+p, li { text-align: justify; }
+p { margin: 3pt 0; }
 ul, ol { margin: 3pt 0; padding-left: 18pt; }
 li { margin: 1.5pt 0; }
 code { font-family: Consolas, "Source Code Pro", monospace; font-size: 0.92em; background: #f3f4f6; padding: 0 2pt; border-radius: 2pt; }
@@ -32,9 +33,9 @@ table { border-collapse: collapse; margin: 4pt 0; width: 100%; }
 th, td { border-top: 0.6pt solid #999; border-bottom: 0.6pt solid #999; padding: 2.5pt 5pt; text-align: left; }
 figure { margin: 4pt 0; text-align: center; break-inside: avoid; }
 figure img { width: 100%; }
-figure.wide img { width: 96%; }
+figure.wide img { width: 88%; }
 figure.side { float: right; width: 54%; margin: 0 0 4pt 10pt; }
-figcaption { font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif; font-size: 8.5pt; color: #333; margin-top: 2pt; }
+figcaption { font-size: 8.5pt; color: #333; margin-top: 2pt; }
 `;
 
 // The page has no address, so the browser would not load local image files; embed them instead.

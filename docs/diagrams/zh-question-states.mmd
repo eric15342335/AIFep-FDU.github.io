@@ -1,30 +1,28 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "22px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 14, "rankSpacing": 34, "padding": 10, "wrappingWidth": 360, "subGraphTitleMargin": {"top": 4, "bottom": 10}}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "22px", "lineColor": "#334155", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 16, "rankSpacing": 36, "padding": 10, "wrappingWidth": 300, "subGraphTitleMargin": {"top": 4, "bottom": 10}}}}%%
 %% Compact Chinese version of question-states.mmd for the course report (docs/report/report.md).
 flowchart TB
     subgraph SESSION["<b>沙箱内：一次智能体会话</b>"]
         direction TB
         turn(["模型回合"])
-        tool(["执行工具，返回结果<br/>（zoom 返回放大的图像）"])
-        check{{"baseline 检查：<br/>答案合格吗？"}}
-        remind(["提醒一次调用 answer，<br/>已做的工作保留"])
-        grace(["最后一轮：<br/>只剩 answer 工具"])
+        tool(["执行工具<br/>（zoom 返回放大图像）"])
+        check{{"baseline 检查：<br/>答案合格？"}}
+        grace(["最后一轮：<br/>只能调用 answer"])
         saved(["保存 answer.json"])
-        turn -- "调用 zoom、bash、<br/>read 或 write" --> tool
-        turn -- "调用 answer" --> check
-        turn -- "第一次没调用<br/>answer 就停下" --> remind
-        tool -. "第 25 轮结束" .-> grace
+        turn -- "调用工具" --> tool
+        tool -.-> turn
+        turn -. "首次停下：提醒一次" .-> turn
+        turn -- "调用<br/>answer" --> check
+        check -. "不合格：返回原因" .-> turn
+        turn -- "用满 25 轮" --> grace
         grace --> check
         check -- "合格" --> saved
-        tool -.-> turn
-        remind -.-> turn
-        check -. "不合格：返回原因" .-> turn
     end
-    SESSION -- "会话结束：含第二次停下、<br/>最后一轮仍不合格、<br/>超时 30 分钟" --> host(["主机用 baseline 再次校验，<br/>保存本题记录"])
+    SESSION -- "会话结束或<br/>超时 30 分钟" --> host(["主机用 baseline 复核，<br/>保存记录"])
 
     classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
     classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3
     classDef agent fill:#ecfdf5,stroke:#10b981,color:#064e3b
     class check base
     class host usesBase
-    class turn,tool,remind,grace,saved agent
+    class turn,tool,grace,saved agent
     style SESSION fill:#f8fafc,stroke:#10b981,stroke-width:3px

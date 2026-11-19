@@ -1,4 +1,4 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "19px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 18, "rankSpacing": 30, "padding": 10, "wrappingWidth": 300, "subGraphTitleMargin": {"top": 4, "bottom": 10}}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "19px", "lineColor": "#334155", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 18, "rankSpacing": 30, "padding": 10, "wrappingWidth": 300, "subGraphTitleMargin": {"top": 4, "bottom": 10}}}}%%
 %% Compact Chinese version of architecture.mmd for the course report (docs/report/report.md).
 flowchart TB
     subgraph BASE["<b>课程 baseline 代码（复用）</b>"]
@@ -8,7 +8,8 @@ flowchart TB
 
     subgraph HOST["<b>主机上的运行程序（新增）</b>"]
         direction LR
-        prep["① 准备页面图像<br/>和 PDF 文本层"] --> task["② 写题目任务，<br/>文件名换成「该文档」"] --> start["③ 每题启动一个<br/>沙箱，16 题并行"] -- "容器结束后" --> check["④ 再次校验<br/>答案，保存记录"] --> retry["⑤ 无答案的题重跑；<br/>连续 8 题失败即停"] --> out["⑥ 生成<br/>submission.xlsx"]
+        prep["① 准备页面图像<br/>和 PDF 文本层"] --> task["② 生成题目提示词，<br/>文件名换成「该文档」"] --> start["③ 每题启动一个沙箱，<br/>16 题并行；连续 8 题<br/>失败即停止派发"] -- "容器结束后" --> check["④ 再次校验<br/>答案，保存记录"] --> out["⑤ 生成<br/>submission.xlsx"]
+        out -. "第一遍后：无答案的题重跑一次" .-> start
     end
 
     subgraph BOX["<b>沙箱容器</b>（每题一个，不能上网）"]
@@ -22,7 +23,7 @@ flowchart TB
         gw -. "记录" .-> trace["Phoenix<br/>每次调用的记录"]
     end
 
-    BASE -- "①②④⑥ 和<br/>answer 复用" --> HOST
+    BASE -- "①②④⑤ 和<br/>answer 复用" --> HOST
     HOST -- "③ 启动容器" --> BOX
     BOX -- "模型调用：唯一出口" --> SVC
 
@@ -33,7 +34,7 @@ flowchart TB
     classDef folder fill:#f1f5f9,stroke:#94a3b8,color:#0f172a
     classDef ext fill:#fff7ed,stroke:#f97316,color:#7c2d12
     class render,prompts,checker,writer base
-    class start,retry host
+    class start host
     class prep,task,check,out usesBase
     class agent box
     class input,output folder
