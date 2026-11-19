@@ -7,6 +7,7 @@ import { Type } from "typebox";
 
 const MAX_TURNS = Number(process.env.AGENT_MAX_TURNS ?? 25);
 const GRACE = readFileSync(`${process.env.PI_CODING_AGENT_DIR}/grace.md`, "utf8").trim();
+const REMINDER = "你还没有调用 answer 工具，任务尚未完成。请用你的答案调用 answer 工具。";
 const task = JSON.parse(readFileSync("/task/q/question.json", "utf8")) as {
 	question_type: string;
 	answer_format: string;
@@ -31,6 +32,8 @@ const text = (value: string) => ({ type: "text" as const, text: value });
 export default function (pi: ExtensionAPI) {
 	let turns = 0;
 	let emptyRejected = false;
+	let answered = false;
+	let reminded = false;
 
 	// Turn cap. Reaching it buys one grace turn with only `answer` available, so the work is not lost.
 	// It fires only after the last regular turn: sessions that answer within MAX_TURNS never see it.
@@ -40,6 +43,15 @@ export default function (pi: ExtensionAPI) {
 			pi.setActiveTools(["answer"]);
 			pi.sendUserMessage(GRACE, { deliverAs: "steer" });
 		} else if (turns > MAX_TURNS) ctx.abort();
+	});
+
+	// A model sometimes ends its reply with the answer in its thinking but no `answer` call, which ends the
+	// session. Remind it once, in the same session, so the work so far is kept.
+	pi.on("agent_before_settle", async (event) => {
+		if (answered || reminded) return;
+		reminded = true;
+		const reminder = { type: "custom_message" as const, customType: "answer-reminder", content: REMINDER, display: false };
+		return { entries: [...event.entries, reminder], continue: true };
 	});
 
 	pi.registerTool({
@@ -105,6 +117,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			writeFileSync("/work/answer.json", JSON.stringify({ response, normalized: checked.out, turns }));
+			answered = true;
 			return { content: [text("Accepted.")], details: {}, terminate: true };
 		},
 	});

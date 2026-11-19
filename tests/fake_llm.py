@@ -1,6 +1,7 @@
 """Scripted OpenAI-compatible server for an offline end-to-end sandbox test.
 
-Turn 1: call zoom. Turn 2 (after the crop comes back as an image): call answer.
+Turn 1: call zoom. Turn 2: stop with the answer only in the thinking and no tool call, which ends a
+session unless the harness reminds the model. Turn 3 (after that reminder): call answer.
 Streams SSE like an OpenAI-compatible server.
 Run inside the sandbox image on the internal network with alias `litellm`.
 """
@@ -27,6 +28,9 @@ def reply_for(messages):
     )
     if not tool_results:
         return "zoom", {"page": 1, "x0": 0, "y0": 0, "x1": 500, "y1": 500}
+    # Until the harness reminds it, stop without a tool call.
+    if "还没有调用 answer" not in json.dumps(messages, ensure_ascii=False):
+        return None, {}
     if images < 2:  # first page image + the zoom crop
         return "answer", {"answer": "MISSING_TOOL_IMAGE"}
     return "answer", {"answer": "42"}
@@ -40,6 +44,9 @@ class Handler(BaseHTTPRequestHandler):
         print("params:", {k: v for k, v in body.items() if k not in ("messages", "tools")}, flush=True)
         print("tools:", [t["function"]["name"] for t in body.get("tools", [])], flush=True)
         print("authorization header set:", bool(self.headers.get("Authorization")), flush=True)
+        if name is None:
+            self._stop()
+            return
         call = {
             "index": 0,
             "id": f"call_{name}",
@@ -72,13 +79,20 @@ class Handler(BaseHTTPRequestHandler):
             data = {"choices": [{"index": 0, "message": message, "finish_reason": "tool_calls"}]}
             self._send("application/json", json.dumps(data).encode())
             return
-        stream = (
-            "".join(
-                f"data: {json.dumps({'id': 'x', 'object': 'chat.completion.chunk', **c})}\n\n" for c in chunks
-            )
-            + "data: [DONE]\n\n"
-        )
-        self._send("text/event-stream", stream.encode())
+        self._stream(chunks)
+
+    def _stop(self):
+        """Reply with thinking only and finish_reason "stop", as the model did in the local run's q13."""
+        chunks = [
+            {"choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "sum is 42"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 5, "total_tokens": 105}},
+        ]
+        self._stream(chunks)
+
+    def _stream(self, chunks):
+        events = [f"data: {json.dumps({'id': 'x', 'object': 'chat.completion.chunk', **c})}" for c in chunks]
+        self._send("text/event-stream", "".join(e + "\n\n" for e in [*events, "data: [DONE]"]).encode())
 
     def _send(self, content_type, data):
         self.send_response(200)

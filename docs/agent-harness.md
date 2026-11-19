@@ -72,6 +72,7 @@ Bailian reads the thinking settings as top-level request fields. A local server 
    - `zoom` crops a region of a page and returns it enlarged.
    - `answer` checks the answer against the required format (with the baseline's own validator) and ends the session. If the answer has the wrong format, the tool rejects it and tells the agent why, so it can fix it.
 4. If the agent reaches the 25-turn limit, it gets one last turn in which it can only call `answer`.
+   If the agent instead stops early without calling `answer` (a model sometimes leaves the answer in its thinking), the harness reminds it once, in the same session, to call `answer`. The work done so far is kept.
 5. The host validates the answer again, because it never trusts what comes out of a container, and writes it into `submission.xlsx`. If the agent passed its whole output object as the answer text, for example `{"answer": "培养计划课程"}`, the validator takes the inner value.
 
 The prompt never contains a file name or a question number. Any file name in the question text, including short forms such as `62.pdf` for the file `062.pdf`, is replaced with "该文档" ("this document"). The question number is only in an environment variable inside the container, where pi uses it to tag the traces in Phoenix.
