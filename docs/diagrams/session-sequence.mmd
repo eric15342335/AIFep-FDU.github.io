@@ -21,7 +21,7 @@ sequenceDiagram
     G->>M: The same request, with the API key added
     M-->>G: Call zoom on part of page 1
     G-->>S: Call zoom on part of page 1
-    Note over G,M: The gateway forwards every call to Bailian and logs a copy in Phoenix.
+    Note over G,M: The gateway forwards every call to Bailian and exports a trace to Phoenix.
     Note over S: Crops and enlarges that area
     S->>G: The enlarged image
     G-->>S: Call answer with a value

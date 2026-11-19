@@ -45,9 +45,9 @@ Each command reads `.env` by itself, rebuilds the sandbox image (this takes seco
 
 To try a few questions first, add `--limit 10` (the first ten questions) or `--ids 3,5,20` (specific questions). Use `--name` to keep separate runs in separate folders, for example `uv run agent.py run --name pilot --limit 30`.
 
-When the first pass is done, the command goes once more over the questions that ended without an answer, because a model sometimes stops without calling `answer` and usually succeeds on a second try. If a run stops for any reason, start the same command again. Questions that already have an answer are skipped and cost nothing. This includes a question whose container saved its answer just before the run stopped. Questions that failed or ran out of time start again from the beginning, so the tokens they used before are paid again. To redo one question on purpose, delete its file in `runs/<name>/records/`.
+When the first pass is done, the command goes once more over the questions that ended without an answer, because a model sometimes stops without calling `answer` and usually succeeds on a second try. If a run stops for any reason, start the same command again. Questions that already have an answer are skipped and cost nothing. This includes a question whose container saved its answer just before the run stopped. Questions that failed or ran out of time start again from the beginning, so the tokens they used before are paid again. To redo one question on purpose, delete both its record `runs/<name>/records/<id>.json` and its folder `runs/<name>/work/<id>/`, because a saved `answer.json` is reused too.
 
-Rerunning only some questions, for example with `--ids`, still writes every answer the run folder holds into `submission.xlsx`, not just the rerun ones. A run folder only accepts answers from one model on one server: it remembers both in `runs/<name>/origin.json` and refuses to continue if either changes, so a test run and the real run can never mix. Use a new `--name` for each server.
+Rerunning only some questions, for example with `--ids`, still writes every answer the run folder holds into `submission.xlsx`, not just the rerun ones. A run folder only accepts answers from one model on one server: it remembers both in `runs/<name>/origin.json` and refuses to continue if the model name or the server's host name changes. Use a new `--name` for each server, and also when you change only its port or path, which the check does not see.
 
 If 8 questions in a row fail, the run stops starting new questions, because that usually means the API key, the quota or the service is broken. The questions that were never started get the status `not_started`. The command then exits with an error and tells you to run it again once the problem is fixed.
 
@@ -57,7 +57,7 @@ The main and production target is Alibaba Cloud Bailian. The competition require
 
 For development, the harness also works with a model server on your own machine, such as [vLLM](https://docs.vllm.ai/), [SGLang](https://docs.sglang.ai/) or [Ollama](https://ollama.com/), as long as it speaks the OpenAI chat-completions API. Testing against a local server costs nothing, so it is the right place to try prompt or tool changes before spending money on the real endpoint. The `runs/full` results below came from such a development run. To use a local server:
 
-- Put the local settings in their own file, for example `.env.local`, so the real Bailian key never goes to the test server. Pass it with `uv run agent.py --env-file .env.local run --name local`.
+- Put the local settings in their own file, for example `.env.local`, so a local test does not read the real Bailian key from `.env`. A variable already set in your shell takes precedence over both files, so run local tests from a clean shell. Pass it with `uv run agent.py --env-file .env.local run --name local`.
 - Set `DASHSCOPE_BASE_URL` to the server's address as seen from inside Docker, for example `http://host.docker.internal:8000/v1`. Docker containers cannot reach `127.0.0.1` on your machine, which is why the address uses `host.docker.internal`.
 - Set `DASHSCOPE_MODEL` to the name the server uses for the model, for example `Qwen3.8-Flash-Next`. The agent still asks the gateway for `qwen3.8-flash`, and the gateway passes the request on under the server's name.
 - Set `DASHSCOPE_API_KEY` to any non-empty text if the server does not check keys.
@@ -78,7 +78,7 @@ Bailian reads the thinking settings as top-level request fields. A local server 
 ## What one question looks like
 
 1. The host prepares the document once and keeps the result in `runs/cache/`: page images (the same renderer as the baseline) and, for PDFs, the text layer with word coordinates. Some PDFs have a broken text layer, where the fonts map every character to the wrong symbol, so the text reads like `!"#$%&'()*+`. The host leaves such a layer out (fewer than half of its characters are letters, digits or Chinese characters), and the agent reads the page image instead.
-2. The host starts a container for the question. The container has no internet access. The only address it can reach is the LiteLLM model gateway.
+2. The host starts a container for the question. The container has no internet access. Its network is internal: the only service on it is the LiteLLM model gateway.
 3. The agent receives the page images and the question, and works for up to 25 turns. Besides `read`, `bash` and `write`, it has two tools written for this task:
    - `zoom` crops a region of a page and returns it enlarged.
    - `answer` checks the answer against the required format (with the baseline's own validator) and ends the session. If the answer has the wrong format, the tool rejects it and tells the agent why, so it can fix it.
@@ -143,7 +143,7 @@ A question ends with one of these statuses: `ok` (a validated answer), `empty` (
 
 This run used the open-weight Qwen3.8-Flash-Next model on a local vLLM server, with the same thinking level as above.
 
-| | Baseline (one model call per question) | Agent harness |
+| | Baseline (one request per question, plus a repair request when the format is wrong) | Agent harness |
 |---|---|---|
 | Platform score | 71.6 (about 650 of 908 correct) | **78.7** (about 715 of 908 correct) |
 | Answers submitted | 908 | 907 (the agent left 1 empty on purpose) |

@@ -3,7 +3,7 @@
 %% origin.json in the run folder records the model and server.
 %% 8 failures in a row: MAX_FAILURES_IN_A_ROW in tableqa/agent.py; one retry pass: --retries in agent.py.
 flowchart TB
-    begin(("start")) --> origin{"Same model and server<br/>as this run folder?"}
+    begin(("start")) --> origin{"Same model name and<br/>server host as this run folder?"}
     origin -- "no" --> refuse(["Refuse to start:<br/>choose another run name"])
     origin -- "yes, or a new folder" --> prepare(["Prepare every document once<br/>(kept for later runs)"])
     prepare --> ANSWER

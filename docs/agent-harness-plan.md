@@ -4,7 +4,7 @@ How to run it: [agent-harness.md](agent-harness.md).
 
 ## 1. Idea
 
-The baseline sends the page images and the question to Qwen once and takes the answer (71.6 points). The harness keeps the same model, inputs and answer contract, but lets the model work on the question like an engineer would: look at the page, zoom into the region it needs, search the PDF text layer, compute with Python, check the answer format, then submit.
+The baseline sends the page images and the question to Qwen and takes the answer, with one repair request when the format is wrong (71.6 points). The harness keeps the same model, inputs and answer contract, but lets the model work on the question like an engineer would: look at the page, zoom into the region it needs, search the PDF text layer, compute with Python, check the answer format, then submit.
 
 One question = one isolated sandbox = one agent session = one answer. No multi-stage pipeline, no ensembles.
 
@@ -33,7 +33,7 @@ Compared with a separate OCR model such as PaddleOCR: for PDFs with a text layer
 - **Limits:** 25 regular turns plus one answer-only turn, 30 minutes per question, maximum reasoning effort.
 - **Model:** `qwen3.8-flash` on Alibaba Cloud Bailian for the real run. During development, the same harness ran against the open-weight Qwen3.8-Flash-Next model on a local vLLM server, which costs nothing per call.
 - **Collection:** the host re-validates `answer.json` and writes `submission.xlsx`. A question without a valid answer stays empty.
-- **Observability:** every model call goes through LiteLLM and is traced in Phoenix (tokens, latency, run/question tags). Full transcripts are kept per question.
+- **Observability:** every model call goes through LiteLLM, which exports traces to Phoenix (tokens, latency, run/question tags); under heavy load some traces can be dropped. Full transcripts are kept per question.
 
 ![The states of one question](diagrams/question-states.svg)
 
@@ -44,7 +44,7 @@ Compared with a separate OCR model such as PaddleOCR: for PDFs with a text layer
 The platform scores submissions (5 per day). The plan uses 1–2 submissions:
 
 1. Run the agent on all 908 questions, submit, compare with the baseline's 71.6.
-2. Report the cost next to the score: tokens, wall-clock time, tool calls and turns per question (`report.json`).
+2. Report the cost next to the score: tokens, summed sandbox time, tool calls and turns per question (`report.json`).
 3. Optional control: the one-shot baseline against the same model (one extra submission), so the score difference can be attributed to the harness rather than to a different model version.
 
 No tuning against the leaderboard between submissions, so there is nothing to overfit.
@@ -59,7 +59,7 @@ Risks:
 
 1. **Tool-calling reliability** of the model (malformed or quoted tool calls, loops). Mitigated by the turn cap, the `answer` validator and host re-validation.
 2. **No `answer` call:** if the model ends with plain text, it is reminded once in the same session; if it stops again, the question stays empty.
-3. **Images in tool results** must reach the model; `agent.py smoke` checks this before any run.
+3. **Images in tool results** must reach the model; run `agent.py smoke` once before the first run to check this.
 4. **Cost:** an agent session uses many more tokens than one request. Recorded and reported, not hidden.
 5. **Context growth:** every zoom adds an image, so the model API must accept about 30 images per request (`smoke` checks this).
 

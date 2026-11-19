@@ -25,7 +25,7 @@ flowchart TB
         empty -- "no" --> saved
         again -- "yes" --> remind
         again -- "no" --> noanswer
-        grace -- "answer accepted<br/>by the checker" --> saved
+        grace -- "accepted by the<br/>answer tool" --> saved
         grace -- "no valid answer" --> noanswer
         tool --> cap
         remind --> cap
@@ -44,7 +44,7 @@ flowchart TB
     record(["Save the record: ok, empty,<br/>no_answer, timeout or failed"])
     hostcheck -- "valid file: ok or empty" --> record
     hostcheck -- "no file: no_answer<br/>or timeout" --> record
-    hostcheck -- "invalid file: failed" --> record
+    hostcheck -- "invalid file: failed<br/>(or timeout if stopped)" --> record
 
     classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
     classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3

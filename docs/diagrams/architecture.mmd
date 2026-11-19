@@ -2,7 +2,7 @@
 %% The parts of the agent harness, what each one can reach, and which parts come from the course baseline.
 %% Edges connect subgraphs (not their nodes), so each subgraph keeps its own direction.
 flowchart TB
-    subgraph BASE["<b>Course baseline, reused unchanged</b>"]
+    subgraph BASE["<b>Course baseline, reused</b>"]
         direction LR
         render["<b>Page renderer</b><br/>turns each PDF page or photo<br/>into a JPEG image"]
         prompts["<b>Question prompts</b><br/>the instructions for each<br/>question type"]
@@ -17,15 +17,14 @@ flowchart TB
             direction LR
             prep["<b>1. Prepare each document once</b><br/>page images (baseline renderer) and,<br/>when usable, the PDF text layer: the<br/>text and word positions stored in the PDF"]
             task["<b>2. Write each question's task</b><br/>the baseline prompt, with file names<br/>replaced by 该文档 ('this document'),<br/>and how to submit through answer"]
-            start["<b>3. Start one sandbox per question</b><br/>16 at a time; 25 turns plus one<br/>answer-only turn; 30 minutes each;<br/>answers already paid for are reused"]
+            start["<b>3. Start one sandbox per question</b><br/>16 at a time; 25 turns plus one<br/>answer-only turn; 30 minutes each;<br/>answers already paid for are reused;<br/>no new questions after 8 failures in a row"]
             prep --> task --> start
         end
         subgraph ROW2[" "]
             direction LR
             check["<b>4. Check and record</b><br/>the baseline checker runs again<br/>on answer.json; one record<br/>per question"]
-            retry["<b>5. Retry and stop rules</b><br/>one more pass for questions without<br/>an answer; no new questions after<br/>8 failures in a row"]
-            out["<b>6. Write the results</b><br/>submission.xlsx (baseline Excel<br/>writer) and a cost report"]
-            check --> retry --> out
+            out["<b>5. Write the results</b><br/>submission.xlsx (baseline Excel<br/>writer) and a cost report; after<br/>the first pass, questions without an<br/>answer go back to step 3 once"]
+            check --> out
         end
         ROW1 -- "step 4 starts when a container exits or is stopped after 30 minutes" --> ROW2
     end
@@ -40,7 +39,7 @@ flowchart TB
 
     subgraph SVC["<b>Services</b>"]
         direction LR
-        gw["<b>Model gateway (LiteLLM)</b><br/>the only address a sandbox can<br/>reach; adds the API key, so the<br/>key never enters a sandbox"]
+        gw["<b>Model gateway (LiteLLM)</b><br/>the only service on the<br/>sandbox network; adds the API key, so the<br/>key never enters a sandbox"]
         model["<b>Alibaba Cloud Bailian</b><br/>qwen3.8-flash<br/>(or a local test server)"]
         trace["<b>Phoenix</b><br/>a log of the model calls:<br/>time, tokens and (optional)<br/>messages,<br/>labelled with run and question"]
         gw -- "forwards the call" --> model
@@ -52,7 +51,7 @@ flowchart TB
         k1["Course baseline"] ~~~ k2["Added by us, on the host"] ~~~ k4["Uses baseline code"] ~~~ k3["Inside the sandbox"] ~~~ k5["Services"] ~~~ k6[("Shared folder")]
     end
 
-    BASE -- "reused by steps 1, 2, 4 and 6" --> HOST
+    BASE -- "reused by steps 1, 2, 4 and 5" --> HOST
     HOST -- "step 3: one container per question, with its input and output folders" --> BOX
     BOX -- "model calls, the only way out" --> SVC
     SVC ~~~ KEY
@@ -64,7 +63,7 @@ flowchart TB
     classDef folder fill:#f1f5f9,stroke:#94a3b8,color:#0f172a
     classDef ext fill:#fff7ed,stroke:#f97316,color:#7c2d12
     class render,prompts,checker,writer,k1 base
-    class start,retry,k2 host
+    class start,k2 host
     class prep,task,check,out,k4 usesBase
     class agent,k3 box
     class input,output,k6 folder
