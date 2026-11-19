@@ -1,5 +1,5 @@
-# Sandbox for one agent session: pi + a fixed, offline Python toolset. No model weights, no OCR engines.
-# Build from the repo root: docker build -f agent/Dockerfile -t tableqa-agent .
+# The sandbox image for one agent session: the pi agent and a fixed set of offline Python tools.
+# It contains no model weights and no OCR engines. `uv run agent.py` builds it automatically.
 FROM node:24-bookworm-slim
 
 RUN apt-get update \
@@ -12,9 +12,9 @@ RUN uv pip install --system --break-system-packages --no-cache -r /tmp/sandbox-r
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.5.2 && npm cache clean --force
 
-# Read-only pi config; the entrypoint copies it to a writable tmpfs at start.
+# The pi settings are read-only here; the entrypoint copies them to a writable temporary folder at start.
 COPY agent/pi /opt/pi-agent
-# Same answer validator as the baseline (stdlib only) plus the zoom/check helpers.
+# The same answer validator as the baseline (standard library only), plus the helpers behind `zoom` and the answer check.
 COPY tableqa/__init__.py tableqa/schema.py /opt/tableqa/
 COPY agent/tools.py /opt/tableqa_tools.py
 COPY agent/entrypoint.sh /usr/local/bin/entrypoint.sh

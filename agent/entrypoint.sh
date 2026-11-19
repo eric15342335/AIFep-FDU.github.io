@@ -1,5 +1,7 @@
 #!/bin/bash
-# One agent session. Inputs: /task/doc (pages, text layer), /task/q (prompt.md, question.json). Output: /work.
+# Runs one agent session inside the sandbox container.
+# Input: /task/doc holds the page images and the text layer; /task/q holds prompt.md and question.json.
+# Output: the agent writes its answer and the session transcript to /work.
 set -euo pipefail
 : "${AGENT_MODEL:?AGENT_MODEL is required}"
 
@@ -19,7 +21,7 @@ common=(--print --offline --no-context-files --no-skills --no-prompt-templates -
   --model "local/$AGENT_MODEL" --thinking "${AGENT_THINKING:-off}"
   --append-system-prompt "$PI_CODING_AGENT_DIR/agent-prompt.md")
 
-# A session that hit the turn cap before the grace turn existed: replay just that turn on it.
+# For a session that hit the turn limit before the final answer-only turn existed, run only that turn.
 if [[ -n "${AGENT_RESUME:-}" ]]; then
   exec pi "${common[@]}" --tools answer --session "$AGENT_RESUME" "$(cat "$PI_CODING_AGENT_DIR/grace.md")"
 fi
