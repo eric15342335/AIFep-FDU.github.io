@@ -1,21 +1,16 @@
 """Regression tests: one per failure seen in the pilot and full runs (2026-11-17)."""
 
-import importlib.util
 import json
 import re
 from pathlib import Path
 
 import pytest
+import yaml
 from PIL import Image
+from sandbox import ROOT, tools
 
 from tableqa.agent import NO_TEXT_NOTE, capped_session, prepare_materials, task_prompt
 from tableqa.xlsxio import Question
-
-ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("sandbox_tools", ROOT / "agent" / "tools.py")
-assert spec and spec.loader
-tools = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tools)
 
 
 @pytest.fixture
@@ -79,9 +74,9 @@ def test_pi_waits_as_long_as_the_gateway():
 
 def test_gateway_routes_only_the_configured_qwen_model():
     # The sandbox can reach the gateway, so the gateway must not spend the key on any other model.
-    gateway = (ROOT / "agent/litellm.yaml").read_text(encoding="utf-8")
+    gateway = yaml.safe_load((ROOT / "agent/litellm.yaml").read_text(encoding="utf-8"))
     env = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert re.findall(r"model_name:\s*(\S+)", gateway) == ["qwen3.8-flash"]
+    assert [m["model_name"] for m in gateway["model_list"]] == ["os.environ/AGENT_MODEL"]
     assert "export AGENT_MODEL='qwen3.8-flash'" in env
 
 

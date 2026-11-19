@@ -1,19 +1,13 @@
 import asyncio
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 from PIL import Image
+from sandbox import ROOT, tools
 
-from tableqa.agent import AgentConfig, cost_rmb, prepare_materials, run, session_stats, task_prompt
+from tableqa.agent import PRICE_RMB, AgentConfig, cost_rmb, prepare_materials, run, session_stats, task_prompt
 from tableqa.xlsxio import Question
-
-ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("sandbox_tools", ROOT / "agent" / "tools.py")
-assert spec and spec.loader
-tools = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tools)
 
 
 def question(**kw):
@@ -60,8 +54,9 @@ def test_cost_estimate_counts_previous_call_as_cached_prefix(tmp_path):
     usage = session_stats(tmp_path)["usage"]
     assert usage["cachedEstimate"] == 5200  # turn 2 resends turn 1's prompt and reply
     cost = cost_rmb(usage)
-    assert cost["no_cache"] == round((12000 * 0.8 + 300 * 2.7) / 1e6, 4)
-    assert cost["prefix_cache_best_case"] == round((6800 * 0.8 + 5200 * 0.1 + 300 * 2.7) / 1e6, 4)
+    inp, cached, out = PRICE_RMB["input"], PRICE_RMB["cached_input"], PRICE_RMB["output"]
+    assert cost["no_cache"] == round((12000 * inp + 300 * out) / 1e6, 4)
+    assert cost["prefix_cache_best_case"] == round((6800 * inp + 5200 * cached + 300 * out) / 1e6, 4)
 
 
 def test_sandbox_check_uses_baseline_validator():
