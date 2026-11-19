@@ -109,3 +109,48 @@ def test_capped_session_is_trimmed_to_its_last_tool_result(tmp_path):
     assert roles == ["assistant", "toolResult"]
     assert len((session / "s.capped").read_text().splitlines()) == 3  # original kept for audit
     assert capped_session(tmp_path) is None  # already trimmed: nothing to resume twice
+
+
+def test_answer_wrapped_in_its_own_output_object_is_unwrapped():
+    # Bailian run, q107: the agent passed '{"answer": "培养计划课程"}' as the answer text,
+    # and the validator accepted the wrapper itself as a string answer.
+    from tableqa.schema import normalize_response
+
+    raw = json.dumps({"answer": '\n{"answer": "培养计划课程"}\n', "calculations": []}, ensure_ascii=False)
+    assert normalize_response(raw, "extract", "string") == "培养计划课程"
+    wrapped = json.dumps(
+        {
+            "answer": json.dumps(
+                {
+                    "answer": None,
+                    "calculations": [{"index": None, "expression": "1+2", "decimals": None, "suffix": ""}],
+                }
+            )
+        }
+    )
+    # The calculations compute the whole answer, even when the answer itself is null.
+    assert normalize_response(wrapped, "thinking", "number") == "3"
+    # A JSON-looking text answer with keys of its own is a real answer, not a wrapper.
+    literal = json.dumps({"answer": json.dumps({"answer": "A", "notes": "B"})})
+    assert normalize_response(literal, "extract", "string") == '{"answer": "A", "notes": "B"}'
+    structure = {
+        "row_count": 1,
+        "col_count": 1,
+        "cells": [{"text": "a", "row": 0, "col": 0, "rowspan": 1, "colspan": 1}],
+    }
+    raw = json.dumps({"answer": json.dumps(structure)})
+    assert '"row_count":1' in normalize_response(raw, "structure", "json")
+
+
+def test_garbled_pdf_text_layer_is_dropped():
+    # Bailian test run, q699: 073.pdf's text layer reads like '!"#$%&' because of broken font maps,
+    # yet the prompt calls the text layer more accurate than the image. The agent spent turns on it.
+    import pymupdf
+
+    from tableqa.agent import readable
+
+    with pymupdf.open(ROOT / "data/files/073.pdf") as pdf:
+        assert not any(readable(page.get_text()) for page in pdf)
+    with pymupdf.open(ROOT / "data/files/062.pdf") as pdf:
+        assert all(readable(page.get_text()) for page in pdf)
+    assert readable("营业收入 1,234.56 万元") and not readable("!\"#$ %&'( )*+,-.")

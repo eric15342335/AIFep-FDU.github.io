@@ -6,7 +6,7 @@ import ast
 import json
 import re
 from collections import defaultdict
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from itertools import islice
 
 
@@ -324,9 +324,23 @@ def normalize_response(raw: str, question_type: str, answer_format: str = "") ->
     if not isinstance(payload, dict) or "answer" not in payload:
         raise AnswerError('模型必须返回包含 "answer" 的 JSON 对象')
     answer = payload["answer"]
-    if answer is None or answer == "":
-        return ""
+    # Models sometimes put their whole output object into the answer text: '{"answer": "x"}'.
+    # Take the inner value instead of submitting the wrapper as the answer.
+    if isinstance(answer, str) and answer.strip().startswith("{"):
+        try:
+            inner = json_loads(answer)
+        except AnswerError:
+            inner = None
+        # Only a bare wrapper: a dict with other keys may be a real JSON answer.
+        if isinstance(inner, dict) and "answer" in inner and set(inner) <= {"answer", "calculations"}:
+            answer = inner["answer"]
+            calculations = payload.get("calculations") or inner.get("calculations", [])
+            payload = {"answer": answer, "calculations": calculations}
     kind = answer_format.strip().lower()
+    # A reasoning answer can be computed entirely by its calculations, with no answer of its own.
+    computed = question_type == "thinking" and bool(payload.get("calculations")) and kind != "json_array"
+    if (answer is None or answer == "") and not computed:
+        return ""
     if question_type != "structure" and kind == "json_array" and isinstance(answer, str):
         answer = json_loads(answer)
     if question_type != "structure" and kind == "json_array" and not isinstance(answer, list):
