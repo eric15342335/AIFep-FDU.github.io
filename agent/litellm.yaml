@@ -1,21 +1,26 @@
-# Pass every model name through to the OpenAI-compatible upstream; log every call to Phoenix.
-# LiteLLM's hosted_vllm provider is used because it forwards chat_template_kwargs to the Qwen model API.
+# The gateway forwards calls for one model to Alibaba Cloud Bailian's OpenAI-compatible API and logs every call
+# to Phoenix. Only this model name is forwarded, so code inside a sandbox cannot spend the key on another model.
+# LiteLLM's `hosted_vllm` provider is a plain OpenAI-compatible client that passes Bailian's extra top-level
+# fields (enable_thinking, preserve_thinking, top_k and so on) through unchanged. The same setup works with a
+# local test server (vLLM, SGLang, Ollama); see docs/agent-harness.md.
 model_list:
-  - model_name: "*"
+  - model_name: qwen3.8-flash
     litellm_params:
-      model: "hosted_vllm/*"
+      model: hosted_vllm/qwen3.8-flash
       api_base: os.environ/UPSTREAM_API_BASE
-      api_key: "none"
+      api_key: os.environ/UPSTREAM_API_KEY
 
-# No key: the port is bound to 127.0.0.1 and the sandbox network is internal; the upstream is unauthenticated too.
+# The gateway itself needs no key, because its port is only open on this machine and the sandbox network
+# has no internet access. The Bailian key is only in this container's environment, never in a sandbox.
 general_settings:
   dangerously_permit_weak_or_unset_master_key: true
 
 litellm_settings:
   callbacks: ["arize_phoenix"]
-  # Message bodies off: every call carries base64 images (1-2 MB), and at 32 workers Phoenix
-  # pinned a CPU and LiteLLM dropped span batches over the 64 MB export limit. Phoenix keeps
-  # latency, tokens, tags and errors; transcripts are in runs/<name>/work/<id>/session.
-  turn_off_message_logging: true
+  # Full messages are logged so that a run can be watched live in Phoenix. Each call carries 1-2 MB of
+  # base64 images. In an earlier run with 32 parallel containers, Phoenix fell behind and LiteLLM dropped
+  # traces larger than the 64 MB export limit. That loses only traces: the session files in
+  # runs/<name>/work/<id>/session remain the complete record.
+  turn_off_message_logging: false
   drop_params: false
   request_timeout: 900

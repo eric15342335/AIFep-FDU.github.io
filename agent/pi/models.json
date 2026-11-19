@@ -7,15 +7,10 @@
       "headers": { "x-litellm-tags": "$TABLEQA_TAG" },
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false,
+        "supportsReasoningEffort": true,
         "supportsStore": false,
         "maxTokensField": "max_tokens",
-        "thinkingFormat": "chat-template",
-        "chatTemplateKwargs": {
-          "enable_thinking": { "$var": "thinking.enabled" },
-          "preserve_thinking": true,
-          "reasoning_effort": { "$var": "thinking.effort", "omitWhenOff": true }
-        }
+        "thinkingFormat": "qwen"
       },
       "models": [
         {
@@ -31,7 +26,13 @@
           "input": ["text", "image"],
           "contextWindow": 262144,
           "maxTokens": 65536,
-          "samplingParams": { "temperature": 1.0, "top_p": 0.95, "top_k": 20 },
+          "samplingParams": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "preserve_thinking": true,
+            "vl_high_resolution_images": true
+          },
           "samplingParamsByThinkingLevel": { "off": { "temperature": 0.7, "top_p": 0.8 } }
         }
       ]

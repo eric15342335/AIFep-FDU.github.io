@@ -1,6 +1,7 @@
-# Gateway + tracing for the agent experiment. Start from the repo root:
-#   source .env && docker compose -f agent/compose.yaml up -d
-# Sandboxes join the internal `tableqa-sandbox` network; LiteLLM is the only thing they can reach.
+# The model gateway (LiteLLM) and the tracing service (Phoenix) for the agent harness.
+# `uv run agent.py smoke` and `uv run agent.py run` start them automatically with the settings in .env.
+# The sandbox containers join the internal `tableqa-sandbox` network, where LiteLLM is the only reachable service.
+# Only the LiteLLM container receives the Bailian API key.
 name: tableqa-agent
 
 services:
@@ -8,7 +9,7 @@ services:
     image: arizephoenix/phoenix@sha256:09ec48906c054a27dd09a88c8e6bcc24fe89649d3ecc94d3a8ed394e21279b31  # v21.1.0
     environment:
       PHOENIX_WORKING_DIR: /mnt/data
-      PHOENIX_ENABLE_AUTH: "false"  # local only: the port is bound to 127.0.0.1
+      PHOENIX_ENABLE_AUTH: "false"  # No login needed: the port is only open on this machine (127.0.0.1).
     volumes:
       - phoenix-data:/mnt/data
     ports:
@@ -20,7 +21,8 @@ services:
     volumes:
       - ./litellm.yaml:/app/config.yaml:ro
     environment:
-      UPSTREAM_API_BASE: ${AGENT_BASE_URL:?source .env first}
+      UPSTREAM_API_BASE: ${DASHSCOPE_BASE_URL:?set it in .env}
+      UPSTREAM_API_KEY: ${DASHSCOPE_API_KEY:?set it in .env}
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
       PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
       PHOENIX_PROJECT_NAME: tableqa-agent

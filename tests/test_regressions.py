@@ -77,11 +77,12 @@ def test_pi_waits_as_long_as_the_gateway():
     assert timeout and settings["httpIdleTimeoutMs"] >= int(timeout.group(1)) * 1000
 
 
-def test_phoenix_message_bodies_stay_off():
-    # Full run at 32 workers: with bodies on, Phoenix pinned a CPU and LiteLLM dropped span
-    # batches over the 64 MB OTLP limit.
+def test_gateway_routes_only_the_configured_qwen_model():
+    # The sandbox can reach the gateway, so the gateway must not spend the key on any other model.
     gateway = (ROOT / "agent/litellm.yaml").read_text(encoding="utf-8")
-    assert re.search(r"^\s*turn_off_message_logging:\s*true\s*$", gateway, re.M)
+    env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert re.findall(r"model_name:\s*(\S+)", gateway) == ["qwen3.8-flash"]
+    assert "export AGENT_MODEL='qwen3.8-flash'" in env
 
 
 def test_turn_cap_gives_one_answer_only_grace_turn_after_the_last_regular_turn():
