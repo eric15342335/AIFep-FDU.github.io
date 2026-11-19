@@ -19,7 +19,12 @@ def reply_for(messages):
         if part.get("type") == "image_url"
     )
     tool_results = [m for m in messages if m.get("role") == "tool"]
-    print(f"request: {len(messages)} messages, {images} images, {len(tool_results)} tool results", flush=True)
+    replayed = [m.get("reasoning_content") for m in messages if m.get("role") == "assistant"]
+    print(
+        f"request: {len(messages)} messages, {images} images, {len(tool_results)} tool results, "
+        f"replayed reasoning: {replayed}",
+        flush=True,
+    )
     if not tool_results:
         return "zoom", {"page": 1, "x0": 0, "y0": 0, "x1": 500, "y1": 500}
     if images < 2:  # first page image + the zoom crop
@@ -31,8 +36,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         name, args = reply_for(body["messages"])
-        keys = ("chat_template_kwargs", "temperature", "top_p", "top_k", "max_tokens")
-        print("params:", {k: body.get(k) for k in keys}, flush=True)
+        # Every top-level field except the bulky ones, as the upstream received it after LiteLLM.
+        print("params:", {k: v for k, v in body.items() if k not in ("messages", "tools")}, flush=True)
+        print("tools:", [t["function"]["name"] for t in body.get("tools", [])], flush=True)
+        print("authorization header set:", bool(self.headers.get("Authorization")), flush=True)
         call = {
             "index": 0,
             "id": f"call_{name}",
@@ -40,9 +47,25 @@ class Handler(BaseHTTPRequestHandler):
             "function": {"name": name, "arguments": json.dumps(args)},
         }
         chunks = [
-            {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [call]}}]},
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "reasoning_content": f"thinking before {name}"},
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "delta": {"tool_calls": [call]}}]},
             {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
-            {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}},
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "total_tokens": 110,
+                    "prompt_tokens_details": {"cached_tokens": 60},
+                },
+            },
         ]
         if not body.get("stream"):
             message = {"role": "assistant", "content": None, "tool_calls": [call]}

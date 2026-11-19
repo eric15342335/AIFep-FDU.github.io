@@ -63,11 +63,15 @@ def number_card(text: str, size: tuple[int, int] = (640, 240)) -> Image.Image:
 
 
 def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
-    off = {"chat_template_kwargs": {"enable_thinking": False}}
+    # Bailian's OpenAI-compatible fields, top level (the same ones pi sends; see agent/pi/models.json).
+    off = {"enable_thinking": False}
+
+    def call(messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+        payload = {"model": model, "messages": messages, "max_tokens": 2048, "temperature": 0, **off, **extra}
+        return post(base_url, "/chat/completions", payload)
 
     def chat(messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
-        payload = {"model": model, "messages": messages, "max_tokens": 2048, "temperature": 0, **off, **extra}
-        return post(base_url, "/chat/completions", payload)["choices"][0]["message"]
+        return call(messages, **extra)["choices"][0]["message"]
 
     def text_check() -> str:
         reply = chat([{"role": "user", "content": "Reply with exactly: OK"}])
@@ -93,7 +97,12 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         # The baseline adds a per-image max_pixels key (DashScope extension).
         part = image_part(number_card("8642")) | {"max_pixels": 5760000}
         reply = chat(
-            [{"role": "user", "content": [part, {"type": "text", "text": "Number? Digits only."}]}],
+            [
+                {
+                    "role": "user",
+                    "content": [part, {"type": "text", "text": 'Number? Reply as JSON {"n": "<digits>"}.'}],
+                }
+            ],
             response_format={"type": "json_object"},
         )
         return (reply.get("content") or "").strip()
@@ -151,21 +160,51 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         return (reply.get("content") or "").strip()
 
     def thinking_check() -> str:
-        reply = chat(
+        result = call(
             [{"role": "user", "content": "What is 17*23? Number only."}],
-            chat_template_kwargs={"enable_thinking": True, "reasoning_effort": "xhigh"},
+            enable_thinking=True,
+            reasoning_effort="xhigh",
+            temperature=1.0,
         )
+        reply, usage = result["choices"][0]["message"], result.get("usage", {})
         reasoning = reply.get("reasoning_content") or reply.get("reasoning") or ""
         assert reasoning and "<think>" not in (reply.get("content") or ""), reply
-        return f"reasoning {len(reasoning)} chars, answer {reply.get('content', '').strip()}"
-
-    def responses_api_check() -> str:
-        result = post(
-            base_url,
-            "/responses",
-            {"model": model, "input": "Reply with exactly: OK", "max_output_tokens": 256},
+        details = usage.get("completion_tokens_details") or {}
+        return (
+            f"reasoning {len(reasoning)} chars ({details.get('reasoning_tokens')} tokens), "
+            f"answer {reply.get('content', '').strip()}"
         )
-        return str(result.get("output_text") or result.get("status"))
+
+    def high_res_check() -> str:
+        # A page over the default 2.6 MP cap: the flag must raise its image tokens, not cap them.
+        page_image = Image.new("RGB", (1600, 2400), "white")
+        message = [{"role": "user", "content": [image_part(page_image), {"type": "text", "text": "OK?"}]}]
+        default = call(message, max_tokens=8)["usage"]["prompt_tokens"]
+        high = call(message, max_tokens=8, vl_high_resolution_images=True)["usage"]["prompt_tokens"]
+        assert high > default, (default, high)
+        return f"prompt tokens {default} default, {high} with vl_high_resolution_images"
+
+    def preserve_thinking_check() -> str:
+        # The reasoning pi replays in history must reach the model (and is billed as input).
+        history = [
+            {"role": "user", "content": "Pick a number."},
+            {"role": "assistant", "content": "7", "reasoning_content": "Let me think. " * 200},
+            {"role": "user", "content": "Say it again. Number only."},
+        ]
+        thinking = {"enable_thinking": True, "temperature": 1.0, "max_tokens": 64}
+        kept = call(history, preserve_thinking=True, **thinking)["usage"]["prompt_tokens"]
+        dropped = call(history, preserve_thinking=False, **thinking)["usage"]["prompt_tokens"]
+        assert kept > dropped + 300, (kept, dropped)
+        return f"prompt tokens {kept} with history reasoning, {dropped} without"
+
+    def cache_check() -> str:
+        # Implicit prefix cache: a repeated long prompt should report cached tokens (not guaranteed).
+        rows = "\n".join(f"| row {i} | {i * 37 % 101} | {i * 53 % 97} |" for i in range(400))
+        message = [{"role": "user", "content": f"Table:\n{rows}\nReply with exactly: OK"}]
+        first = call(message, max_tokens=8)["usage"]
+        second = call(message, max_tokens=8)["usage"]
+        cached = (second.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+        return f"prompt tokens {first['prompt_tokens']}, cached on repeat {cached}"
 
     checks: list[tuple[str, Callable[[], str]]] = [
         ("text", text_check),
@@ -175,7 +214,9 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         ("image in tool result (pi format)", tool_result_image_check),
         ("30 images in one request", many_images_check),
         ("thinking on, parsed", thinking_check),
-        ("responses API (info only)", responses_api_check),
+        ("high-resolution images", high_res_check),
+        ("preserve_thinking replays reasoning", preserve_thinking_check),
+        ("implicit prefix cache (info only)", cache_check),
     ]
     results = []
     for name, check in checks:
