@@ -19,25 +19,26 @@ flowchart TB
         what -- "called zoom, bash,<br/>read or write" --> tool
         what -- "called answer" --> check
         what -- "stopped without<br/>calling answer" --> again
-        what -- "25 turns used" --> grace
         check -- "accepted" --> saved
         again -- "yes" --> remind
         again -- "no" --> noanswer
         grace -- "answer accepted<br/>by the checker" --> saved
         grace -- "no valid answer" --> noanswer
         tool -.-> turn
+        tool -. "turn 25 ended" .-> grace
         remind -.-> turn
-        check -. "rejected, with the reason: wrong format,<br/>or empty (an empty answer is refused once)" .-> turn
+        check -. "rejected: wrong format,<br/>or first empty answer" .-> turn
     end
 
     timeout(["30 minutes have passed:<br/>the host stops the container"])
-    turn -. "at any point" .-> timeout
+    SESSION -. "30 min, at any point" .-> timeout
     hostcheck(["Host checks answer.json again<br/>with the baseline checker"])
     saved --> hostcheck
     noanswer --> hostcheck
     timeout --> hostcheck
-    record(["Save the question's record:<br/>ok, a valid answer;<br/>empty, the agent found no value;<br/>no answer, or timeout"])
-    hostcheck --> record
+    record(["Save the record: ok, empty,<br/>no_answer, timeout or failed"])
+    hostcheck -- "accepted, or no answer" --> record
+    hostcheck -- "rejected: failed" --> record
 
     classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
     classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3
@@ -49,4 +50,4 @@ flowchart TB
     class record ours
     class start,turn,what,tool,again,remind,grace,saved agent
     class timeout,noanswer bad
-    style SESSION fill:#f8fafc,stroke:#10b981,stroke-width:2px,stroke-dasharray:6 4
+    style SESSION fill:#f8fafc,stroke:#10b981,stroke-width:3px

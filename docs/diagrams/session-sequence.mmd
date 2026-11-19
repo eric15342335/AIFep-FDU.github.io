@@ -1,35 +1,34 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "16px", "actorBkg": "#ffffff", "actorBorder": "#64748b", "actorTextColor": "#0f172a", "noteBkgColor": "#f1f5f9", "noteBorderColor": "#94a3b8", "noteTextColor": "#0f172a", "signalColor": "#475569", "signalTextColor": "#0f172a"}, "sequence": {"mirrorActors": false, "noteMargin": 14, "boxMargin": 12, "boxTextMargin": 8, "messageMargin": 40, "actorMargin": 60, "wrap": true, "width": 170}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "16px", "actorBkg": "#ffffff", "actorBorder": "#64748b", "actorTextColor": "#0f172a", "noteBkgColor": "#f1f5f9", "noteBorderColor": "#94a3b8", "noteTextColor": "#0f172a", "signalColor": "#475569", "signalTextColor": "#0f172a"}, "sequence": {"mirrorActors": false, "noteMargin": 14, "boxMargin": 12, "boxTextMargin": 8, "messageMargin": 40, "actorMargin": 40, "wrap": true, "width": 170}}}%%
 %% Who talks to whom for one ordinary question, with one rejected answer.
 %% Every other branch (the reminder, the last answer-only turn, the 30-minute limit) is in question-states.mmd.
 sequenceDiagram
     box rgb(238,242,255) On the host
         participant R as Runner
     end
+    box rgb(254,252,232) Course baseline code
+        participant C as Answer checker (one copy in the sandbox, one on the host)
+    end
     box rgb(236,253,245) Sandbox, no internet
         participant S as AI agent (pi)
     end
-    box rgb(254,252,232) Course baseline
-        participant C as Answer checker (normalize_response)
-    end
     box rgb(255,247,237) Services
         participant G as Model gateway (LiteLLM)
-        participant P as Phoenix (call log)
         participant M as Bailian qwen3.8-flash
     end
 
     R->>S: Start the container: input folder (page images, text layer, task), output folder
     S->>G: Task, page images, tool list
     G->>M: The same request, with the API key added
-    G--)P: A copy of the call
-    M-->>S: Call zoom on part of page 1
+    M-->>G: Call zoom on part of page 1
+    G-->>S: Call zoom on part of page 1
+    Note over G,M: The gateway forwards every call to Bailian and logs a copy in Phoenix.
     Note over S: Crops and enlarges that area
-    S->>M: The enlarged image
-    Note over S,M: Every call takes the same path through the gateway, which logs a copy in Phoenix.
-    M-->>S: Call answer with a value
+    S->>G: The enlarged image
+    G-->>S: Call answer with a value
     S->>C: The answer
     C-->>S: Rejected: wrong format, and why
-    S->>M: "Rejected", with the reason
-    M-->>S: Call answer with a corrected value
+    S->>G: "Rejected", with the reason
+    G-->>S: Call answer with a corrected value
     S->>C: The corrected answer
     C-->>S: Valid
     Note over S: Saves answer.json in the output folder and ends the session

@@ -3,7 +3,7 @@
 %% origin.json in the run folder records the model and server.
 %% 8 failures in a row: MAX_FAILURES_IN_A_ROW in tableqa/agent.py; one retry pass: --retries in agent.py.
 flowchart TB
-    begin(("start")) --> origin{"Same model and server<br/>as the answers already<br/>in this run folder?"}
+    begin(("start")) --> origin{"Same model and server<br/>as this run folder?"}
     origin -- "no" --> refuse(["Refuse to start:<br/>choose another run name"])
     origin -- "yes, or a new folder" --> prepare(["Prepare every document once<br/>(kept for later runs)"])
     prepare --> ANSWER
@@ -15,15 +15,16 @@ flowchart TB
         gate{"Have 8 questions<br/>failed in a row?"}
         skip(["Do not start it: the API key,<br/>the quota or the service is<br/>probably broken"])
         session(["Run the question in its own<br/>sandbox (see the state diagram<br/>for one question)"])
-        lookup -- "yes, including an answer saved just before an interruption" --> reuse
+        lookup -- "yes (also an answer saved<br/>before an interruption)" --> reuse
         lookup -- "no" --> gate
         gate -- "yes" --> skip
         gate -- "no" --> session
     end
 
-    ANSWER -- "first pass done, some questions have no answer" --> retry(["Retry pass: the same steps,<br/>once more, for those questions"])
-    retry --> write
-    ANSWER -- "every question answered, or stopped early after 8 failures in a row (the file then has gaps)" --> write(["Write submission.xlsx<br/>and a cost report"])
+    ANSWER --> write(["Write submission.xlsx<br/>and a cost report"])
+    write --> more{"First pass, some questions<br/>without an answer, and no<br/>stop after 8 failures?"}
+    more -- "yes: retry pass,<br/>only those questions" --> ANSWER
+    more -- "no" --> done(("end"))
     ANSWER -. "run interrupted: stopped, crashed or power cut" .-> again(["Run the same command again"])
     again -.-> origin
 
@@ -32,9 +33,9 @@ flowchart TB
     classDef agent fill:#ecfdf5,stroke:#10b981,color:#064e3b
     classDef bad fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
     classDef dot fill:#334155,stroke:#334155,color:#ffffff
-    class origin,lookup,gate,reuse,retry,again ours
+    class origin,lookup,gate,reuse,more,again ours
     class prepare,write usesBase
     class session agent
     class refuse,skip bad
-    class begin dot
+    class begin,done dot
     style ANSWER fill:#f8fafc,stroke:#6366f1,stroke-width:2px
