@@ -90,3 +90,50 @@ def test_run_rejects_ids_that_would_escape_the_run_dir(tmp_path, name, qid):
     with pytest.raises(ValueError, match="unsafe"):
         asyncio.run(run([q], [q], tmp_path, tmp_path, AgentConfig(name=name, model="qwen"), {}))
     assert not any(tmp_path.iterdir())
+
+
+def test_run_stops_starting_questions_after_repeated_failures(tmp_path, monkeypatch):
+    # A broken key or an exhausted quota fails every question; the run must not churn through all 908.
+    import tableqa.agent as agent_module
+
+    calls = []
+
+    async def failing_solve(q, doc_dir, run_dir, config):
+        calls.append(q.id)
+        return {"id": q.id, "status": "no_answer", "answer": "", "error": "HTTP 401"}
+
+    monkeypatch.setattr(agent_module, "solve", failing_solve)
+    monkeypatch.setattr(agent_module, "prepare_materials", lambda path, cache: tmp_path)
+    monkeypatch.setattr(agent_module, "source_path", lambda files, name: tmp_path / name)
+    qs = [question(id=str(i)) for i in range(1, 21)]
+    report = asyncio.run(run(qs, qs, tmp_path, tmp_path, AgentConfig(name="t", model="qwen", workers=1), {}))
+    assert len(calls) == agent_module.MAX_FAILURES_IN_A_ROW
+    assert report["statuses"] == {"no_answer": 8, "not_started": 12}
+
+
+def test_prompt_hides_every_form_of_the_file_name():
+    # 255 questions write "62.pdf" for the file 062.pdf; the model must see neither.
+    q = question(file_name="062.pdf", question="请恢复 62.pdf 中 Table 13 的表头行结构。")
+    prompt = task_prompt(q)
+    assert "62.pdf" not in prompt and "请恢复 该文档 中" in prompt
+
+
+def test_answer_written_before_the_host_stopped_is_kept(tmp_path):
+    # The container wrote answer.json, but the host stopped before saving the record: do not pay again.
+    from tableqa.agent import saved_result
+
+    q = question(id="7", question_type="extract", answer_format="string")
+    work = tmp_path / "work" / "7"
+    work.mkdir(parents=True)
+    (work / "answer.json").write_text(json.dumps({"response": json.dumps({"answer": "x"})}), encoding="utf-8")
+    assert saved_result(q, tmp_path)["answer"] == "x"
+    assert json.loads((tmp_path / "records" / "7.json").read_text(encoding="utf-8"))["status"] == "ok"
+
+
+def test_run_folder_refuses_answers_from_another_model(tmp_path):
+    from tableqa.agent import check_same_model
+
+    check_same_model(tmp_path, AgentConfig(name="t", model="qwen", upstream="localhost"))
+    check_same_model(tmp_path, AgentConfig(name="t", model="qwen", upstream="localhost"))
+    with pytest.raises(ValueError, match="another --name"):
+        check_same_model(tmp_path, AgentConfig(name="t", model="qwen", upstream="dashscope.aliyuncs.com"))

@@ -37,7 +37,12 @@ SUBMIT_NOTE = (
     "提交方式：不要直接输出 JSON，而是调用 answer 工具。answer 参数填写上述 JSON 中 answer 字段的值；"
     "推理题把 calculations 数组填入 calculations 参数。"
 )
+# Stop starting new questions after this many failures in a row. That many usually means the API key,
+# the quota or the service is broken, and every further question would fail the same way.
+MAX_FAILURES_IN_A_ROW = 8
 NO_TEXT_NOTE = "本文档没有 PDF 文本层（没有 page-*.txt 或 words-*.json），只能用 zoom 读图。"
+# Raise this whenever prepare_materials changes what it writes, so old prepared folders are not reused.
+MATERIALS_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,17 @@ class AgentConfig:
         "high"  # pi's thinking level; agent/pi/models.json turns "high" into reasoning_effort=xhigh
     )
     resume: bool = False  # give old turn-capped sessions their final answer-only turn; start nothing new
+    upstream: str = ""  # host name of the model server; a run folder never mixes answers from two servers
+
+
+def readable(text: str) -> bool:
+    """False for a text layer whose fonts map glyphs to the wrong characters.
+
+    Such a layer reads like '!"#$%&()*+' instead of words. In this data set, real text layers are 79-96%
+    letters, digits and CJK characters, and broken ones 13-29%.
+    """
+    chars = [c for c in text if not c.isspace()]
+    return sum(c.isalnum() for c in chars) >= 0.5 * len(chars)
 
 
 def prepare_materials(path: Path, cache_dir: Path) -> Path:
@@ -60,7 +76,7 @@ def prepare_materials(path: Path, cache_dir: Path) -> Path:
     The page images come from the same renderer as the baseline.
     """
     document = prepare_document(path, cache_dir / "pages")
-    out = cache_dir / "docs" / document.sha256
+    out = cache_dir / "docs" / f"v{MATERIALS_VERSION}-{document.sha256}"
     if (out / "done").is_file():
         return out
     out.mkdir(parents=True, exist_ok=True)
@@ -70,7 +86,8 @@ def prepare_materials(path: Path, cache_dir: Path) -> Path:
         with pymupdf.open(path) as pdf:
             for number, page in enumerate(pdf, 1):
                 text = page.get_text().strip()
-                if not text:
+                # A broken text layer would mislead the agent, so skip it; the agent zooms instead.
+                if not text or not readable(text):
                     continue
                 (out / f"page-{number:04d}.txt").write_text(text, encoding="utf-8")
                 # Word positions on the rendered (already rotated) page, scaled to 0-1000 like `zoom`.
@@ -175,13 +192,30 @@ def docker_command(
     ]
 
 
-async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentConfig) -> dict[str, Any]:
+def saved_result(question: Question, run_dir: Path) -> dict[str, Any] | None:
+    """The answer an earlier invocation of this run already paid for, or None."""
     key = id_key(question.id)
     record_path = run_dir / "records" / f"{key}.json"
     if record_path.is_file():
         cached = json.loads(record_path.read_text(encoding="utf-8"))
         if cached.get("status") in ("ok", "empty"):
             return {**cached, "cached": True}
+    # The container may have written its answer just before the host was stopped, so no record exists.
+    work = run_dir / "work" / key
+    if (work / "answer.json").is_file():
+        result: dict[str, Any] = {"id": question.id, "question_type": question.question_type, "answer": ""}
+        result.update(status="failed", cached=True, recovered=True)
+        collect_answer(question, work, result, "")
+        if result["status"] in ("ok", "empty"):
+            result.update(session_stats(work / "session"))
+            atomic_json(record_path, result)
+            return result
+    return None
+
+
+async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentConfig) -> dict[str, Any]:
+    key = id_key(question.id)
+    record_path = run_dir / "records" / f"{key}.json"
     task_dir, work = run_dir / "tasks" / key, run_dir / "work" / key
     resume = None
     if config.resume:
@@ -191,6 +225,7 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     else:
         shutil.rmtree(work, ignore_errors=True)
         work.mkdir(parents=True)
+        work.chmod(0o777)  # On Linux the container's user may differ from the host user that made it.
     task_dir.mkdir(parents=True, exist_ok=True)
     prompt = task_prompt(question, has_text_layer=any(doc_dir.glob("page-*.txt")))
     (task_dir / "prompt.md").write_text(prompt, encoding="utf-8")
@@ -223,11 +258,18 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
             await process.wait()
             result["status"] = "timeout"
     result["seconds"] = round(time.monotonic() - started, 1)
+    collect_answer(question, work, result, log)
+    result.update(session_stats(work / "session"))
+    atomic_json(record_path, result)
+    return result
 
+
+def collect_answer(question: Question, work: Path, result: dict[str, Any], log: str) -> None:
+    """Read the container's answer.json, validate it again on the host, and set the answer and status."""
     answer_file = work / "answer.json"
     if answer_file.is_file():
-        submitted = json.loads(answer_file.read_text(encoding="utf-8"))
-        try:  # Never trust what comes out of a container: validate the answer again on the host.
+        try:  # Never trust what comes out of a container.
+            submitted = json.loads(answer_file.read_text(encoding="utf-8"))
             result["answer"] = normalize_response(
                 submitted["response"], question.question_type, question.answer_format
             )
@@ -237,9 +279,6 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     elif result["status"] != "timeout":
         result["status"] = "no_answer"
         result["error"] = (work / f"stderr{log}.txt").read_bytes()[-2000:].decode("utf-8", "replace")
-    result.update(session_stats(work / "session"))
-    atomic_json(record_path, result)
-    return result
 
 
 def session_stats(session_dir: Path) -> dict[str, Any]:
@@ -289,6 +328,73 @@ def cost_rmb(tokens: dict[str, int]) -> dict[str, float]:
     }
 
 
+async def solve_safely(
+    question: Question, doc_dir: Path, run_dir: Path, config: AgentConfig
+) -> dict[str, Any]:
+    try:
+        return await solve(question, doc_dir, run_dir, config)
+    except Exception as exc:  # pylint: disable=broad-exception-caught  # one broken container must not stop the run
+        return {"id": question.id, "status": "failed", "answer": "", "error": repr(exc)}
+
+
+def check_safe_names(run_name: str, selected: list[Question]) -> None:
+    # Run names and question ids become folder and container names, so allow only safe characters.
+    for value in [run_name, *(id_key(q.id) for q in selected)]:
+        if not SAFE_NAME.fullmatch(value):
+            raise ValueError(f"unsafe run name or question id: {value!r}")
+
+
+def check_same_model(run_dir: Path, config: AgentConfig) -> None:
+    """Refuse to add answers from a different model or model server to an existing run folder."""
+    origin = {"model": config.model, "upstream": config.upstream}
+    path = run_dir / "origin.json"
+    if path.is_file():
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if saved != origin:
+            raise ValueError(f"{run_dir} holds answers from {saved}, not {origin}; choose another --name")
+    elif any((run_dir / "records").glob("*.json")):
+        raise ValueError(f"{run_dir} holds answers from an unknown model; choose another --name")
+    else:
+        atomic_json(path, origin)
+
+
+class FailureStreak:
+    """Counts questions that failed in a row; after MAX_FAILURES_IN_A_ROW, no new questions start."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    @property
+    def tripped(self) -> bool:
+        return self.count >= MAX_FAILURES_IN_A_ROW
+
+    def record(self, status: str) -> bool:
+        """Count one finished question. Returns True for the failure that trips the limit."""
+        if self.tripped:  # Once tripped, stay tripped: a late success must not restart the run.
+            return False
+        if status in ("ok", "empty"):
+            self.count = 0
+        elif status != "skipped":
+            self.count += 1
+            return self.count == MAX_FAILURES_IN_A_ROW
+        return False
+
+
+def summarize(config: AgentConfig, selected: list[Question], results: list[dict[str, Any]]) -> dict[str, Any]:
+    usage = sum((Counter(r.get("usage", {})) for r in results), Counter())
+    return {
+        "run": config.name,
+        "config": config.__dict__,
+        "selected": len(selected),
+        "statuses": dict(Counter(r["status"] for r in results)),
+        "tool_calls": dict(sum((Counter(r.get("tools", {})) for r in results), Counter())),
+        "mean_turns": round(sum(r.get("turns", 0) for r in results) / max(1, len(results)), 2),
+        "tokens": dict(usage),
+        "official_api_cost_rmb": cost_rmb(usage),
+        "sandbox_seconds": round(sum(r.get("seconds", 0) for r in results), 1),
+    }
+
+
 async def run(
     questions: list[Question],
     selected: list[Question],
@@ -298,24 +404,31 @@ async def run(
     fallback: dict[str, str],
     progress=print,
 ) -> dict[str, Any]:
-    # Run names and question ids become folder and container names, so allow only safe characters.
-    for value in [config.name, *(id_key(q.id) for q in selected)]:
-        if not SAFE_NAME.fullmatch(value):
-            raise ValueError(f"unsafe run name or question id: {value!r}")
+    check_safe_names(config.name, selected)
     run_dir = out_dir / config.name
+    check_same_model(run_dir, config)
     docs = {
         name: prepare_materials(source_path(files_dir, name), out_dir / "cache")
         for name in dict.fromkeys(q.file_name for q in selected)
     }
     gate = asyncio.Semaphore(config.workers)
     results: list[dict[str, Any]] = []
+    streak = FailureStreak()
 
     async def one(question: Question) -> None:
         async with gate:
-            try:
-                result = await solve(question, docs[question.file_name], run_dir, config)
-            except Exception as exc:  # One broken container must not stop the whole run.
-                result = {"id": question.id, "status": "failed", "answer": "", "error": repr(exc)}
+            saved = saved_result(question, run_dir)
+            if saved is not None:
+                result: dict[str, Any] = saved
+            elif streak.tripped:
+                result = {"id": question.id, "status": "not_started", "answer": ""}
+            else:
+                result = await solve_safely(question, docs[question.file_name], run_dir, config)
+                if streak.record(result["status"]):
+                    progress(
+                        f"{MAX_FAILURES_IN_A_ROW} questions failed in a row; starting no new questions. "
+                        f"Last error: {str(result.get('error', ''))[-500:]}"
+                    )
         results.append(result)
         progress(
             f"[{len(results)}/{len(selected)}] id={question.id} {result['status']} "
@@ -324,22 +437,16 @@ async def run(
 
     await asyncio.gather(*(one(q) for q in selected))
 
-    answers = {id_key(r["id"]): r["answer"] for r in results if r.get("answer")}
+    # Take every answer this run folder holds, not only this invocation's, so that rerunning a few
+    # questions with --ids does not empty the rest of the submission.
+    answers = {}
+    for question in questions:
+        saved = saved_result(question, run_dir)
+        if saved and saved.get("answer"):
+            answers[id_key(question.id)] = saved["answer"]
     filled = {k: v for k, v in fallback.items() if k not in answers and v}
     write_submission(run_dir / "submission.xlsx", questions, answers | filled)
-    usage = sum((Counter(r.get("usage", {})) for r in results), Counter())
-    report = {
-        "run": config.name,
-        "config": config.__dict__,
-        "selected": len(selected),
-        "statuses": dict(Counter(r["status"] for r in results)),
-        "answers_from_agent": len(answers),
-        "answers_from_fallback": len(filled),
-        "tool_calls": dict(sum((Counter(r.get("tools", {})) for r in results), Counter())),
-        "mean_turns": round(sum(r.get("turns", 0) for r in results) / max(1, len(results)), 2),
-        "tokens": dict(usage),
-        "official_api_cost_rmb": cost_rmb(usage),
-        "sandbox_seconds": round(sum(r.get("seconds", 0) for r in results), 1),
-    }
+    report = summarize(config, selected, results)
+    report.update(answers_from_agent=len(answers), answers_from_fallback=len(filled))
     atomic_json(run_dir / "report.json", report)
     return report
