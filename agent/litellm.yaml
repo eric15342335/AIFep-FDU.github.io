@@ -6,7 +6,8 @@
 model_list:
   - model_name: qwen3.8-flash
     litellm_params:
-      model: hosted_vllm/qwen3.8-flash
+      # The name the upstream server knows the model by (compose.yaml builds it from DASHSCOPE_MODEL).
+      model: os.environ/UPSTREAM_MODEL
       api_base: os.environ/UPSTREAM_API_BASE
       api_key: os.environ/UPSTREAM_API_KEY
 
