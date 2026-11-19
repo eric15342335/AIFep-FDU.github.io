@@ -151,7 +151,7 @@ This is the submitted result. Every model call went to `qwen3.8-flash` on Alibab
 - All 908 questions ended `ok`, so the retry pass had nothing to do.
 - The run took about 28 minutes with 16 containers in parallel. The median question took 11 seconds and 2 turns; the mean was 3.5 turns, and 10 questions used all 25 regular turns.
 - Tool calls per question: 1.98 `zoom`, 0.95 `bash`, 0.21 `read` and 1.01 `answer`.
-- Bailian reported 80.6% of all input tokens as cache hits (18.59 million cached, 4.47 million not cached). With those hits the run cost ¥8.61, about ¥0.01 per question; with no caching it would have cost ¥21.62.
+- Bailian reported 80.6% of all input tokens as cache hits (18.59 million cached, 4.47 million not cached). Priced with those hits, the estimated cost is ¥8.61, about ¥0.01 per question; with no caching it would have cost ¥21.62.
 - 83% to 84% of its answers are identical to each of the three local development runs. Two local runs agree with each other on about 86%, so the Bailian run differs from them about as much as they differ from each other.
 
 ### Development run on a local server (2026-11-17)

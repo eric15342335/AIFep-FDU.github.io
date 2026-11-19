@@ -11,7 +11,7 @@ flowchart TB
         turn -- "调用工具" --> tool
         tool -.-> turn
         turn -. "首次停下：提醒一次" .-> turn
-        turn -- "调用<br/>answer" --> check
+        turn -- "提交" --> check
         check -. "不合格：返回原因" .-> turn
         turn -- "用满 25 轮" --> grace
         grace --> check

@@ -19,8 +19,8 @@ flowchart TB
 
     subgraph SVC["<b>服务</b>"]
         direction LR
-        gw["模型网关 LiteLLM<br/>沙箱唯一可访问的地址，<br/>在此加上 API Key"] -- "转发" --> model["阿里云百炼<br/>qwen3.8-flash"]
-        gw -. "记录" .-> trace["Phoenix<br/>每次调用的记录"]
+        gw["模型网关 LiteLLM<br/>沙箱内网上唯一的服务，<br/>在此加上 API Key"] -- "转发" --> model["阿里云百炼<br/>qwen3.8-flash"]
+        gw -. "记录" .-> trace["Phoenix<br/>调用追踪"]
     end
 
     BASE -- "①②④⑤ 和<br/>answer 复用" --> HOST

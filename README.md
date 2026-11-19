@@ -7,7 +7,7 @@
 本仓库有两套方案：
 
 - **Baseline**：每道题把整页图像发给模型直接作答，格式不对时追加修复请求，平台得分 71.6。用法见下文。
-- **Agent 方案**：每道题在独立的 Docker 容器中运行一个 AI agent。agent 可以放大页面局部、读取 PDF 文本层、用 Python 计算，最后提交经过格式校验的答案。正式提交使用百炼 qwen3.8-flash，平台得分 78.6，比 baseline 高 7.0 分；908 道题全部作答，用时约 28 分钟，费用 8.61 元。用法、设计和结果见 [docs/agent-harness.md](docs/agent-harness.md)。
+- **Agent 方案**：每道题在独立的 Docker 容器中运行一个 AI agent。agent 可以放大页面局部、读取 PDF 文本层、用 Python 计算，最后提交经过格式校验的答案。正式提交使用百炼 qwen3.8-flash，平台得分 78.6，比 baseline 高 7.0 分；908 道题全部作答，用时约 28 分钟，估算费用 8.61 元。用法、设计和结果见 [docs/agent-harness.md](docs/agent-harness.md)。
 
 Agent 方案只需三步（需要 Docker 和 uv）：
 
