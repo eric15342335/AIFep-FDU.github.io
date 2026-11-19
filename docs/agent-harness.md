@@ -139,9 +139,24 @@ A question ends with one of these statuses: `ok` (a validated answer), `empty` (
 
 ## Results
 
+### Official run on Bailian (2026-11-20)
+
+This is the submitted result. Every model call went to `qwen3.8-flash` on Alibaba Cloud Bailian (Beijing). The sandbox containers, the LiteLLM gateway and Phoenix ran on our own PC, where they crop images, run Python, forward requests and keep logs.
+
+| | Baseline (one request per question, plus a repair request when the format is wrong) | Agent harness |
+|---|---|---|
+| Platform score | 71.6 | **78.6** (+7.0) |
+| Answers submitted | 908 | 908, all from the agent, none from the baseline |
+
+- All 908 questions ended `ok`, so the retry pass had nothing to do.
+- The run took about 28 minutes with 16 containers in parallel. The median question took 11 seconds and 2 turns; the mean was 3.5 turns, and 10 questions used all 25 regular turns.
+- Tool calls per question: 1.98 `zoom`, 0.95 `bash`, 0.21 `read` and 1.01 `answer`.
+- Bailian reported 80.6% of all input tokens as cache hits (18.59 million cached, 4.47 million not cached). With those hits the run cost ¥8.61, about ¥0.01 per question; with no caching it would have cost ¥21.62.
+- 83% to 84% of its answers are identical to each of the three local development runs. Two local runs agree with each other on about 86%, so the Bailian run differs from them about as much as they differ from each other.
+
 ### Development run on a local server (2026-11-17)
 
-This run used the open-weight Qwen3.8-Flash-Next model on a local vLLM server, with the same thinking level as above.
+This run used the open-weight Qwen3.8-Flash-Next model on a local vLLM server, with the same thinking level as above. Two later local runs scored 78.1 and 78.6.
 
 | | Baseline (one request per question, plus a repair request when the format is wrong) | Agent harness |
 |---|---|---|
@@ -163,8 +178,6 @@ Before the full run, `uv run agent.py smoke` passed all its checks on Bailian, a
 - 6 answers were identical to the local development run. Checked by hand against the documents, the other 4 were no worse: in two (q448, a phone number, and q699, a four-row table header) the Bailian answer was right and the local one wrong. The other two (q589 and q749) differ only in whether an empty top-left header corner counts as one merged cell or two cells, which the page does not settle.
 - Bailian reported 88% of all input tokens as cache hits (578,816 cached, 79,049 not cached). The 10 questions cost ¥0.18, compared with ¥0.59 if nothing had been cached.
 - Most questions took 8 to 73 seconds. The slowest one, a large table-structure question, used 23 turns and took 9.6 minutes. On the local server, the same questions took 31 to 441 seconds each.
-
-At this rate, all 908 questions should cost roughly ¥10 to ¥20 and take about 1.5 hours with 16 containers.
 
 ## Command options
 
