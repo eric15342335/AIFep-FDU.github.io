@@ -1,0 +1,50 @@
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "17px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 18, "rankSpacing": 30, "padding": 10, "wrappingWidth": 300, "subGraphTitleMargin": {"top": 4, "bottom": 10}}}}%%
+%% Compact Chinese version of architecture.mmd for the course report (docs/report/report.md).
+flowchart TB
+    subgraph BASE["<b>课程 baseline（原样复用）</b>"]
+        direction LR
+        render["页面渲染<br/>PDF 页、照片 → 图像"] ~~~ prompts["分题型提示词"] ~~~ checker["答案检查<br/>normalize_response"] ~~~ writer["Excel 输出"]
+    end
+
+    subgraph HOST["<b>主机上的运行程序（新增）</b>"]
+        direction LR
+        prep["① 每份文档准备一次：<br/>页面图像＋可用的 PDF 文本层"] --> task["② 写题目任务：<br/>文件名换成「该文档」"] --> start["③ 每题启动一个沙箱，<br/>16 题并行"]
+        check["④ 用 baseline 检查<br/>再次校验，保存记录"] --> retry["⑤ 无答案的题重跑一次；<br/>连续 8 题失败即停"] --> out["⑥ 生成 submission.xlsx<br/>和费用报告"]
+        start ~~~ check
+    end
+
+    subgraph LOW[" "]
+    direction LR
+    subgraph BOX["<b>沙箱容器</b>（每题一个，不能上网）"]
+        direction TB
+        input[("只读输入：页面图像、<br/>文本层、题目")] --> agent["<b>pi 智能体</b><br/>zoom 放大局部<br/>answer 检查并提交<br/>bash、read、write 检索与计算"] --> output[("可写输出：<br/>answer.json、完整对话")]
+    end
+
+    subgraph SVC["<b>服务</b>"]
+        direction TB
+        gw["模型网关 LiteLLM<br/>沙箱唯一可访问的地址，<br/>在此加上 API Key"] -- "转发" --> model["阿里云百炼<br/>qwen3.8-flash"]
+        gw -. "记录" .-> trace["Phoenix<br/>每次调用的记录"]
+    end
+    BOX -- "模型调用：<br/>唯一出口" --> SVC
+    end
+
+    BASE -- "①②④⑥ 和 answer 复用" --> HOST
+    HOST -- "③ 启动容器" --> LOW
+
+    classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
+    classDef host fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3
+    classDef box fill:#ecfdf5,stroke:#10b981,color:#064e3b,stroke-width:2px
+    classDef folder fill:#f1f5f9,stroke:#94a3b8,color:#0f172a
+    classDef ext fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    class render,prompts,checker,writer base
+    class start,retry host
+    class prep,task,check,out usesBase
+    class agent box
+    class input,output folder
+    class gw,model,trace ext
+    style BASE fill:#fffbeb,stroke:#ca8a04,stroke-width:2px,stroke-dasharray:6 4
+    style HOST fill:#f8fafc,stroke:#6366f1,stroke-width:2px
+    style BOX fill:#f8fafc,stroke:#10b981,stroke-width:2px,stroke-dasharray:6 4
+    style SVC fill:#f8fafc,stroke:#f97316
+    style LOW fill:none,stroke:none

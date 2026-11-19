@@ -22,7 +22,7 @@ const customFontCSS = ["400", "600"].map((weight) => ({
 	cssUrl: new URL(import.meta.resolve(`@fontsource/source-sans-3/${weight}.css`)),
 }));
 
-const FONT = '"Source Sans 3", sans-serif';
+const FONT = '"Source Sans 3", "Noto Sans SC", "Microsoft YaHei", sans-serif';
 
 const only = process.argv.slice(2);
 for (const file of readdirSync(here).filter((name) => name.endsWith(".mmd"))) {
