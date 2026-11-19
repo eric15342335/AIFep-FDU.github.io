@@ -245,6 +245,12 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     started = time.monotonic()
     # Write the container's output to files, not memory: the container decides how much it prints.
     log = "-resume" if resume else ""
+    # A container of the same name can be left over from an interrupted run, and Docker refuses to reuse
+    # the name. Only this question's own sandbox container has this name.
+    remove = await asyncio.create_subprocess_exec(
+        "docker", "rm", "-f", name, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    await remove.wait()
     with (work / f"stdout{log}.txt").open("wb") as stdout, (work / f"stderr{log}.txt").open("wb") as stderr:
         process = await asyncio.create_subprocess_exec(
             *docker_command(question, config, doc_dir, task_dir, work, name, resume),
