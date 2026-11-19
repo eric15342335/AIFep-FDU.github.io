@@ -34,7 +34,7 @@ Each command reads `.env` by itself, rebuilds the sandbox image (this takes seco
 
 To try a few questions first, add `--limit 10` (the first ten questions) or `--ids 3,5,20` (specific questions). Use `--name` to keep separate runs in separate folders, for example `uv run agent.py run --name pilot --limit 30`.
 
-If a run stops for any reason, start the same command again. Questions that already have an answer are skipped and cost nothing. This includes a question whose container saved its answer just before the run stopped. Questions that failed or ran out of time start again from the beginning, so the tokens they used before are paid again. To redo one question on purpose, delete its file in `runs/<name>/records/`.
+When the first pass is done, the command goes once more over the questions that ended without an answer, because a model sometimes stops without calling `answer` and usually succeeds on a second try. If a run stops for any reason, start the same command again. Questions that already have an answer are skipped and cost nothing. This includes a question whose container saved its answer just before the run stopped. Questions that failed or ran out of time start again from the beginning, so the tokens they used before are paid again. To redo one question on purpose, delete its file in `runs/<name>/records/`.
 
 Rerunning only some questions, for example with `--ids`, still writes every answer the run folder holds into `submission.xlsx`, not just the rerun ones. A run folder only accepts answers from one model on one server: it remembers both in `runs/<name>/origin.json` and refuses to continue if either changes, so a test run and the real run can never mix. Use a new `--name` for each server.
 
@@ -168,6 +168,7 @@ At this rate, all 908 questions should cost roughly ¥10 to ¥20 and take about 
 | `--limit`, `--ids` | all | Run only the first N questions, or only the listed ids |
 | `--fallback` | none | Fill unanswered questions from another submission file |
 | `--no-setup` | off | Skip building the image and starting the gateway |
+| `--retries` | 1 | Extra passes over questions that ended without an answer (a model sometimes stops without calling `answer`) |
 | `--resume` | off | Only for sessions saved before the final answer-only turn existed: give them that one turn and start nothing new |
 
 `--env-file` and `--no-setup` belong before the command name, for example `uv run agent.py --env-file test.env smoke`. Variables that are already set in your shell take priority over the file.

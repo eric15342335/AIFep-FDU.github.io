@@ -105,6 +105,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=positive, help="first N questions only")
     run.add_argument("--ids", help="comma-separated question ids")
     run.add_argument("--resume", action="store_true", help="give turn-capped sessions their grace turn only")
+    run.add_argument(
+        "--retries", type=int, default=1, help="extra passes over questions that ended without an answer"
+    )
     return parser
 
 
@@ -115,13 +118,12 @@ def smoke_command(args: argparse.Namespace, model: str) -> int:
     return 0 if all(ok for name, ok, _ in results if "info only" not in name) else 1
 
 
-def run_command(args: argparse.Namespace, model: str) -> int:
-    fixes = json_loads(args.dataset_fixes.read_text(encoding="utf-8"))
-    questions = read_questions(args.tests, None, fixes)
-    wanted = set(args.ids.split(",")) if args.ids else None
-    selected = [q for q in questions if wanted is None or id_key(q.id) in wanted][: args.limit]
-    fallback = agent.read_answers(args.fallback) if args.fallback else {}
-    config = agent.AgentConfig(
+def unanswered(report: dict) -> int:
+    return sum(n for status, n in report["statuses"].items() if status not in ("ok", "empty", "skipped"))
+
+
+def agent_config(args: argparse.Namespace, model: str) -> agent.AgentConfig:
+    return agent.AgentConfig(
         name=args.name,
         model=model,
         image=args.image,
@@ -132,12 +134,25 @@ def run_command(args: argparse.Namespace, model: str) -> int:
         resume=args.resume,
         upstream=urlsplit(os.getenv("DASHSCOPE_BASE_URL", "")).hostname or "",
     )
-    report = asyncio.run(agent.run(questions, selected, args.files, args.output_dir, config, fallback))
+
+
+def run_command(args: argparse.Namespace, model: str) -> int:
+    fixes = json_loads(args.dataset_fixes.read_text(encoding="utf-8"))
+    questions = read_questions(args.tests, None, fixes)
+    wanted = set(args.ids.split(",")) if args.ids else None
+    selected = [q for q in questions if wanted is None or id_key(q.id) in wanted][: args.limit]
+    fallback = agent.read_answers(args.fallback) if args.fallback else {}
+    config = agent_config(args, model)
+    for attempt in range(args.retries + 1):
+        report = asyncio.run(agent.run(questions, selected, args.files, args.output_dir, config, fallback))
+        unfinished = unanswered(report)
+        # A model sometimes ends a session without calling `answer`; one more try usually succeeds.
+        # After 8 failures in a row (`not_started`), something is broken, and retrying would not help.
+        if not unfinished or args.resume or "not_started" in report["statuses"] or attempt == args.retries:
+            break
+        print(f"Retrying the {unfinished} questions that have no answer yet.")
     report["fallback"] = str(args.fallback) if args.fallback else None
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    unfinished = sum(
-        n for status, n in report["statuses"].items() if status not in ("ok", "empty", "skipped")
-    )
     if unfinished:
         print(f"{unfinished} questions have no answer yet. Run the same command again to retry only those.")
     return 1 if unfinished else 0
