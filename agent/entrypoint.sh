@@ -3,7 +3,7 @@
 # Input: /task/doc holds the page images and the text layer; /task/q holds prompt.md and question.json.
 # Output: the agent writes its answer and the session transcript to /work.
 set -euo pipefail
-: "${AGENT_MODEL:?AGENT_MODEL is required}"
+: "${AGENT_MODEL:?AGENT_MODEL is required}" "${AGENT_THINKING:?AGENT_THINKING is required}"
 
 export HOME=/tmp PI_CODING_AGENT_DIR=/tmp/pi-agent
 cp -r /opt/pi-agent "$PI_CODING_AGENT_DIR"
@@ -18,7 +18,7 @@ EOF
 
 common=(--print --offline --no-context-files --no-skills --no-prompt-templates --no-mcp
   --no-extensions --extension "$PI_CODING_AGENT_DIR/extensions/tableqa.ts"
-  --model "local/$AGENT_MODEL" --thinking "${AGENT_THINKING:-off}"
+  --model "local/$AGENT_MODEL" --thinking "$AGENT_THINKING"
   --append-system-prompt "$PI_CODING_AGENT_DIR/agent-prompt.md")
 
 # For a session that hit the turn limit before the final answer-only turn existed, run only that turn.

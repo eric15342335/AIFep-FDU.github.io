@@ -5,7 +5,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-const MAX_TURNS = Number(process.env.AGENT_MAX_TURNS ?? 25);
+// Set by the host from `--max-turns` (default in AgentConfig), so the limit is defined in one place.
+const MAX_TURNS = Number(process.env.AGENT_MAX_TURNS);
+if (!Number.isInteger(MAX_TURNS) || MAX_TURNS < 1) throw new Error("AGENT_MAX_TURNS must be a positive integer");
 const GRACE = readFileSync(`${process.env.PI_CODING_AGENT_DIR}/grace.md`, "utf8").trim();
 const REMINDER = "你还没有调用 answer 工具，任务尚未完成。请用你的答案调用 answer 工具。";
 const task = JSON.parse(readFileSync("/task/q/question.json", "utf8")) as {
