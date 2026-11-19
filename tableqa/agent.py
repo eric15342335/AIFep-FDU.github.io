@@ -1,8 +1,9 @@
-"""Agentic harness runner: one isolated Docker sandbox (pi agent) per question.
+"""The runner of the agent harness. Each question gets its own Docker container with a pi agent inside.
 
-Host side only: prepares per-document materials, starts sandboxes, re-validates answers with the
-baseline's `normalize_response`, and writes submission.xlsx plus a cost report. Optionally fills
-questions the agent could not answer from another submission (`--fallback`).
+This code runs on the host machine, not inside the containers. It prepares the material for each
+document, starts one container per question, checks every answer again with the baseline's
+`normalize_response`, and writes `submission.xlsx` and a cost report. With `--fallback`, it can fill
+the questions the agent did not answer from another submission file.
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ from .xlsxio import Question, id_key, read_rows, write_submission
 
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 NETWORK = "tableqa-sandbox"
-# qwen3.8-flash list price on Bailian (Beijing), RMB per million tokens, read 2026-11-17.
-# Same for thinking and non-thinking; output includes the reasoning tokens.
+# qwen3.8-flash list price on Bailian (Beijing), RMB per million tokens, read 2026-11-19.
+# Same for thinking and non-thinking; output includes the reasoning tokens. The implicit-cache
+# price is not published in RMB: 0.1 follows the USD ratio (0.014 / 0.113 of input).
 PRICE_RMB = {"input": 0.8, "cached_input": 0.1, "output": 2.7}
 SUBMIT_NOTE = (
     "提交方式：不要直接输出 JSON，而是调用 answer 工具。answer 参数填写上述 JSON 中 answer 字段的值；"
@@ -40,18 +42,23 @@ NO_TEXT_NOTE = "本文档没有 PDF 文本层（没有 page-*.txt 或 words-*.js
 
 @dataclass(frozen=True)
 class AgentConfig:
-    name: str  # run name; also the output folder
+    name: str  # the run name, which is also the name of the output folder
     model: str
     image: str = "tableqa-agent:dev"
     workers: int = 16
     timeout: int = 1800
     max_turns: int = 25
-    thinking: str = "high"  # pi level; models.json maps it to Qwen reasoning_effort=xhigh
-    resume: bool = False  # only give capped sessions the grace turn they missed; start nothing new
+    thinking: str = (
+        "high"  # pi's thinking level; agent/pi/models.json turns "high" into reasoning_effort=xhigh
+    )
+    resume: bool = False  # give old turn-capped sessions their final answer-only turn; start nothing new
 
 
 def prepare_materials(path: Path, cache_dir: Path) -> Path:
-    """Page images (baseline renderer) plus the PDF text layer, once per document."""
+    """Render the page images and extract the PDF text layer, once per document.
+
+    The page images come from the same renderer as the baseline.
+    """
     document = prepare_document(path, cache_dir / "pages")
     out = cache_dir / "docs" / document.sha256
     if (out / "done").is_file():
@@ -66,7 +73,7 @@ def prepare_materials(path: Path, cache_dir: Path) -> Path:
                 if not text:
                     continue
                 (out / f"page-{number:04d}.txt").write_text(text, encoding="utf-8")
-                # Words in the rendered (rotation-applied) frame, normalised to 0-1000 like `zoom`.
+                # Word positions on the rendered (already rotated) page, scaled to 0-1000 like `zoom`.
                 matrix = page.rotation_matrix
                 width, height = page.rect.width, page.rect.height
                 words = []
@@ -91,7 +98,7 @@ def prepare_materials(path: Path, cache_dir: Path) -> Path:
 
 
 def task_prompt(question: Question, has_text_layer: bool = True) -> str:
-    # pilot: without the note, agents grepped a missing text layer first
+    # In the pilot run, agents without this note first searched for a text layer that did not exist.
     note = "" if has_text_layer else "\n" + NO_TEXT_NOTE
     return question_prompt(question) + "\n" + SUBMIT_NOTE + note
 
@@ -101,9 +108,10 @@ def read_answers(path: Path) -> dict[str, str]:
 
 
 def capped_session(work: Path) -> Path | None:
-    """A saved session that the old hard cap aborted, trimmed so it ends on its last tool result.
+    """Prepare a saved session that the old hard turn limit cut off, so it can get its final turn.
 
-    The original stays next to it as `*.capped` (not `*.jsonl`, so stats do not count it twice).
+    The session is trimmed so that it ends on its last tool result. The original file is kept next to it
+    as `*.capped` (not `*.jsonl`, so the statistics do not count it twice).
     """
     files = list((work / "session").glob("*.jsonl"))
     if len(files) != 1:
@@ -200,7 +208,7 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
         "cached": False,
     }
     started = time.monotonic()
-    # Stream to files, not host memory: the sandbox controls how much it prints.
+    # Write the container's output to files, not memory: the container decides how much it prints.
     log = "-resume" if resume else ""
     with (work / f"stdout{log}.txt").open("wb") as stdout, (work / f"stderr{log}.txt").open("wb") as stderr:
         process = await asyncio.create_subprocess_exec(
@@ -219,7 +227,7 @@ async def solve(question: Question, doc_dir: Path, run_dir: Path, config: AgentC
     answer_file = work / "answer.json"
     if answer_file.is_file():
         submitted = json.loads(answer_file.read_text(encoding="utf-8"))
-        try:  # Never trust the sandbox: re-validate on the host.
+        try:  # Never trust what comes out of a container: validate the answer again on the host.
             result["answer"] = normalize_response(
                 submitted["response"], question.question_type, question.answer_format
             )
@@ -239,9 +247,11 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
     usage = Counter[str]()
     turns = 0
     for path in session_dir.glob("**/*.jsonl"):
-        history = 0  # tokens of the previous call's prompt + reply: the next call's shared prefix
+        history = (
+            0  # tokens in the previous call's prompt and reply, which the next call repeats at its start
+        )
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            try:  # stats only: a truncated line must not cost the validated answer
+            try:  # These are only statistics, so a damaged line must not throw away a validated answer.
                 entry = json.loads(line)
             except ValueError:
                 continue
@@ -255,8 +265,8 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
                 raw = message.get("usage") or {}
                 counts = {f: int(raw.get(f) or 0) for f in ("input", "output", "cacheRead")}
                 usage.update(counts)
-                # The server reports no cache hits, so estimate what the official API's implicit
-                # prefix cache could hit: everything the previous call already sent or received.
+                # On a call with no reported hit, estimate what an implicit prefix cache could
+                # have hit: everything the previous call already sent or received.
                 if not counts["cacheRead"]:
                     usage["cachedEstimate"] += min(counts["input"], history)
                 history = counts["input"] + counts["cacheRead"] + counts["output"]
@@ -264,13 +274,18 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
 
 
 def cost_rmb(tokens: dict[str, int]) -> dict[str, float]:
-    """What these tokens would cost on the official API, without and with prefix-cache hits."""
-    prompt, output = tokens.get("input", 0) + tokens.get("cacheRead", 0), tokens.get("output", 0)
-    cached = tokens.get("cacheRead", 0) + tokens.get("cachedEstimate", 0)
-    with_cache = (prompt - cached) * PRICE_RMB["input"] + cached * PRICE_RMB["cached_input"]
+    """Official API cost of these tokens: with no cache, with the hits the API reported, best case."""
+    hits, output = tokens.get("cacheRead", 0), tokens.get("output", 0)
+    prompt = tokens.get("input", 0) + hits
+
+    def cost(cached: int) -> float:
+        paid = (prompt - cached) * PRICE_RMB["input"] + cached * PRICE_RMB["cached_input"]
+        return round((paid + output * PRICE_RMB["output"]) / 1e6, 4)
+
     return {
-        "no_cache": round((prompt * PRICE_RMB["input"] + output * PRICE_RMB["output"]) / 1e6, 4),
-        "prefix_cache_best_case": round((with_cache + output * PRICE_RMB["output"]) / 1e6, 4),
+        "no_cache": cost(0),
+        "reported_cache_hits": cost(hits),
+        "prefix_cache_best_case": cost(hits + tokens.get("cachedEstimate", 0)),
     }
 
 
@@ -283,7 +298,7 @@ async def run(
     fallback: dict[str, str],
     progress=print,
 ) -> dict[str, Any]:
-    # Names and ids become paths and container names: keep them to safe characters.
+    # Run names and question ids become folder and container names, so allow only safe characters.
     for value in [config.name, *(id_key(q.id) for q in selected)]:
         if not SAFE_NAME.fullmatch(value):
             raise ValueError(f"unsafe run name or question id: {value!r}")
@@ -299,7 +314,7 @@ async def run(
         async with gate:
             try:
                 result = await solve(question, docs[question.file_name], run_dir, config)
-            except Exception as exc:  # one broken sandbox must not stop the run
+            except Exception as exc:  # One broken container must not stop the whole run.
                 result = {"id": question.id, "status": "failed", "answer": "", "error": repr(exc)}
         results.append(result)
         progress(
