@@ -10,7 +10,7 @@ The design and the reasons behind it are in [agent-harness-plan.md](agent-harnes
 
 ## Quick start
 
-You need three things installed: [Docker](https://docs.docker.com/get-docker/) (running), [uv](https://docs.astral.sh/uv/), and a Bailian API key from the [Alibaba Cloud Model Studio console](https://bailian.console.aliyun.com/).
+You need three things installed: [Docker](https://docs.docker.com/get-docker/) (running, with Docker Compose 2.17 or newer), [uv](https://docs.astral.sh/uv/), and a Bailian API key from the [Alibaba Cloud Model Studio console](https://bailian.console.aliyun.com/).
 
 1. Copy the settings template and fill in your API key and base URL:
 
@@ -50,7 +50,7 @@ For development, the harness also works with a model server on your own machine,
 - Set `DASHSCOPE_BASE_URL` to the server's address as seen from inside Docker, for example `http://host.docker.internal:8000/v1`. Docker containers cannot reach `127.0.0.1` on your machine, which is why the address uses `host.docker.internal`.
 - Set `DASHSCOPE_MODEL` to the name the server uses for the model, for example `Qwen3.8-Flash-Next`. The agent still asks the gateway for `qwen3.8-flash`, and the gateway passes the request on under the server's name.
 - Set `DASHSCOPE_API_KEY` to any non-empty text if the server does not check keys.
-- With many parallel containers, also set `LITELLM_CONFIG='litellm-no-messages.yaml'`, so Phoenix records only timing and token counts (see "Watching a run").
+- With many parallel containers, also set `PHOENIX_HIDE_MESSAGES='true'`, so Phoenix records only timing and token counts (see "Watching a run").
 
 The settings for the development run in this repository looked like this:
 
@@ -59,7 +59,7 @@ export DASHSCOPE_BASE_URL='http://host.docker.internal:8000/v1'
 export DASHSCOPE_API_KEY='local-test'
 export DASHSCOPE_MODEL='Qwen3.8-Flash-Next'
 export AGENT_MODEL='qwen3.8-flash'
-export LITELLM_CONFIG='litellm-no-messages.yaml'
+export PHOENIX_HIDE_MESSAGES='true'
 ```
 
 Bailian reads the thinking settings as top-level request fields. A local server usually reads them from `chat_template_kwargs` instead and ignores the top-level fields, so on a local server the model uses its chat template's default thinking behaviour.
@@ -111,7 +111,7 @@ Open Phoenix at http://127.0.0.1:6006 (project `tableqa-agent`). Every model cal
 
 Each call carries base64 page images of 1 to 2 MB. In an earlier run with 32 parallel containers, Phoenix fell behind and LiteLLM dropped some traces. If that happens, the run itself is not affected, because the complete record of every session is saved on disk in `runs/<name>/work/<id>/session/`.
 
-For runs with many parallel containers, set `LITELLM_CONFIG='litellm-no-messages.yaml'` in the env file. Phoenix then records each call's timing, token counts and errors, but not the messages. Without the setting, the gateway uses `agent/litellm.yaml`, which logs the full messages.
+For runs with many parallel containers, set `PHOENIX_HIDE_MESSAGES='true'` in the env file. Phoenix then records each call's timing, token counts and errors, but shows the messages as `redacted-by-litellm`. Without the setting, the gateway logs the full messages.
 
 If you do not need tracing, you can ignore Phoenix. It runs as its own container and the harness works the same without anyone looking at it.
 
@@ -185,7 +185,11 @@ docker build -f agent/Dockerfile -t tableqa-agent:dev .
 ```
 
 ```bash
-DASHSCOPE_BASE_URL=http://fake-llm:8000/v1 DASHSCOPE_API_KEY=fake docker compose -f agent/compose.yaml up -d
+export DASHSCOPE_BASE_URL=http://fake-llm:8000/v1 DASHSCOPE_API_KEY=fake AGENT_MODEL=qwen3.8-flash
+```
+
+```bash
+docker compose -f agent/compose.yaml up -d
 ```
 
 ```bash
@@ -193,12 +197,12 @@ MSYS_NO_PATHCONV=1 docker run -d --name fake-llm --network tableqa-agent_default
 ```
 
 ```bash
-DASHSCOPE_BASE_URL=http://fake-llm:8000/v1 DASHSCOPE_API_KEY=fake uv run agent.py run --name e2e --ids 3,5,20 --max-turns 4
+uv run agent.py run --name e2e --ids 3,5,20 --max-turns 4
 ```
 
 On Linux and macOS, replace `$(pwd -W)` with `$(pwd)` and drop `MSYS_NO_PATHCONV=1`.
 
-Expected result: questions 3 and 20 end `ok` with the answer `42`. Question 5 needs a JSON array, so the validator rejects `42` and the question ends `no_answer`. `docker logs fake-llm` shows the exact fields the gateway forwarded, including `enable_thinking`, `reasoning_effort`, `preserve_thinking` and the replayed `reasoning_content`. Afterwards, delete `runs/e2e`, run `docker rm -f fake-llm`, and run the smoke test again so that the gateway switches back to the settings in `.env`.
+Expected result: questions 3 and 20 end `ok` with the answer `42`. Question 5 needs a JSON array, so the validator rejects `42` and the question ends `no_answer`. `docker logs fake-llm` shows the exact fields the gateway forwarded, including `enable_thinking`, `reasoning_effort`, `preserve_thinking` and the replayed `reasoning_content`. Afterwards, delete `runs/e2e`, run `docker rm -f fake-llm`, open a new terminal (so the three exported variables are gone), and run the smoke test again so that the gateway switches back to the settings in `.env`.
 
 ## Sandbox limits
 
@@ -221,7 +225,7 @@ The Bailian API key is only given to the gateway container. The agent containers
 | `agent/Dockerfile` | The sandbox image: pi 1.5.2 and the Python tools |
 | `agent/pi/` | pi settings: the model settings, the extra system prompt, the turn limit and the `zoom` and `answer` tools |
 | `agent/tools.py` | The Python helpers behind `zoom` and the answer check |
-| `agent/compose.yaml`, `agent/litellm.yaml`, `agent/litellm-no-messages.yaml` | The LiteLLM gateway and Phoenix (with and without message logging) |
-| `tests/` | Unit tests and the fake model server |
+| `agent/compose.yaml`, `agent/litellm.yaml` | The LiteLLM gateway and Phoenix |
+| `tests/` | Unit tests, a check that settings repeated across files agree (`test_config.py`), and the fake model server |
 
 Run the unit tests with `uv run pytest`. The diagrams are generated from `docs/diagrams/*.mmd`. To redraw them, run `bun install` and then `bun run render` in `docs/diagrams` (this uses the installed Edge or Chrome browser; set `MERMAID_BROWSER` to use another one).
