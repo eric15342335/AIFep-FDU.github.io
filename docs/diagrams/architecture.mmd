@@ -1,41 +1,78 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 45, "wrappingWidth": 280}}}%%
-%% Components and trust boundaries of the agentic harness.
-%% Edges between subgraphs (not their nodes) keep each subgraph's own direction.
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "16px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 26, "rankSpacing": 44, "padding": 14, "wrappingWidth": 280, "subGraphTitleMargin": {"top": 6, "bottom": 16}}}}%%
+%% The parts of the agent harness, what each one can reach, and which parts come from the course baseline.
+%% Edges connect subgraphs (not their nodes), so each subgraph keeps its own direction.
 flowchart TB
-    subgraph HOST["Host runner · tableqa/agent.py"]
+    subgraph BASE["<b>Course baseline, reused unchanged</b>"]
         direction LR
-        prep["Prepare documents<br/><small>page images · PDF text layer</small>"]
-        launch["Launch sandboxes<br/><small>one per question, N parallel</small>"]
-        collect["Collect<br/><small>re-validate · submission.xlsx</small><br/><small>optional --fallback fills gaps</small>"]
-        prep --> launch ~~~ collect
+        render["<b>Page renderer</b><br/>turns each PDF page or photo<br/>into a JPEG image"]
+        prompts["<b>Question prompts</b><br/>the instructions for each<br/>question type"]
+        checker["<b>Answer checker</b><br/>(normalize_response) parses the<br/>model's JSON and checks it against<br/>the required answer format"]
+        writer["<b>Excel writer</b><br/>writes submission.xlsx in<br/>the competition's format"]
+        render ~~~ prompts ~~~ checker ~~~ writer
     end
 
-    subgraph NET["tableqa-sandbox · internal network, no internet"]
-        direction LR
-        agent["Sandbox × N · pi agent<br/><small>zoom · answer · bash · read · write</small>"]
-        files[("/task ro: pages · text layer · prompt<br/>/work rw: answer.json · session")]
-        agent --- files
+    subgraph HOST["<b>Runner on the host computer</b> (agent.py, tableqa/agent.py)"]
+        direction TB
+        subgraph ROW1[" "]
+            direction LR
+            prep["<b>1. Prepare each document once</b><br/>page images (baseline renderer) and,<br/>when usable, the PDF text layer: the<br/>text and word positions stored in the PDF"]
+            task["<b>2. Write each question's task</b><br/>the baseline prompt, with file names<br/>replaced by 该文档 ('this document'),<br/>and how to submit through answer"]
+            start["<b>3. Start one sandbox per question</b><br/>16 at a time, at most 25 turns<br/>and 30 minutes each"]
+            prep --> task --> start
+        end
+        subgraph ROW2[" "]
+            direction LR
+            check["<b>4. Check and record</b><br/>the baseline checker runs again<br/>on answer.json; one record<br/>per question"]
+            retry["<b>5. Retry and stop rules</b><br/>one more pass for questions without<br/>an answer; no new questions after<br/>8 failures in a row; answers already<br/>paid for are never asked for again"]
+            out["<b>6. Write the results</b><br/>submission.xlsx (baseline Excel<br/>writer) and a cost report"]
+            check --> retry --> out
+        end
+        ROW1 -- "step 4 starts when a container exits and leaves answer.json" --> ROW2
     end
 
-    subgraph SVC["Gateway services"]
+    subgraph BOX["<b>Sandbox container</b>, one per question, no internet"]
         direction LR
-        gw["Model gateway · LiteLLM<br/><small>joins both networks</small>"]
-        model["Alibaba Cloud Bailian · qwen3.8-flash<br/><small>or a local OpenAI-compatible server for testing</small>"]
-        trace["Tracing · Arize Phoenix"]
-        gw --> model
-        gw -. "spans tagged run: / q:" .-> trace
+        input[("<b>Input folder, read only</b><br/>page images, text layer,<br/>the question's task")]
+        agent["<b>AI agent (pi, an open-source<br/>coding agent)</b><br/>tools: zoom (crop and enlarge a page<br/>area), answer (check with the baseline<br/>checker, then save and stop), run<br/>commands (bash), read and write files"]
+        output[("<b>Output folder, writable</b><br/>answer.json and the<br/>full conversation")]
+        input --> agent --> output
     end
 
-    HOST <-->|"docker run · mounts"| NET
-    NET -- "model calls: the only exit" --> SVC
+    subgraph SVC["<b>Services</b>"]
+        direction LR
+        gw["<b>Model gateway (LiteLLM)</b><br/>the only address a sandbox can<br/>reach; adds the API key, so the<br/>key never enters a sandbox"]
+        model["<b>Alibaba Cloud Bailian</b><br/>qwen3.8-flash<br/>(or a local test server)"]
+        trace["<b>Phoenix</b><br/>a log of every model call:<br/>time, tokens and messages,<br/>labelled with run and question"]
+        gw -- "forwards the call" --> model
+        gw -. "logs a copy" .-> trace
+    end
 
+    subgraph KEY["<b>Colours</b>"]
+        direction LR
+        k1["Course baseline"] ~~~ k2["Added by us, on the host"] ~~~ k4["Uses baseline code"] ~~~ k3["Inside the sandbox"] ~~~ k5["Services"]
+    end
+
+    BASE -- "reused by steps 1, 2, 4 and 6, and by the answer tool" --> HOST
+    HOST -- "step 3: one container per question, sharing two folders" --> BOX
+    BOX -- "model calls, the only way out" --> SVC
+    SVC ~~~ KEY
+
+    classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
     classDef host fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3
     classDef box fill:#ecfdf5,stroke:#10b981,color:#064e3b,stroke-width:2px
+    classDef folder fill:#f1f5f9,stroke:#94a3b8,color:#0f172a
     classDef ext fill:#fff7ed,stroke:#f97316,color:#7c2d12
-    class prep,launch,collect host
-    class agent box
-    class files host
-    class gw,model,trace ext
+    class render,prompts,checker,writer,k1 base
+    class start,retry,k2 host
+    class prep,task,check,out,k4 usesBase
+    class agent,k3 box
+    class input,output folder
+    class gw,model,trace,k5 ext
+    style BASE fill:#fffbeb,stroke:#ca8a04,stroke-width:2px,stroke-dasharray:6 4
     style HOST fill:#f8fafc,stroke:#6366f1,stroke-width:2px
-    style NET fill:#f8fafc,stroke:#94a3b8,stroke-dasharray:6 4
+    style ROW1 fill:none,stroke:none
+    style ROW2 fill:none,stroke:none
+    style BOX fill:#f8fafc,stroke:#10b981,stroke-width:2px,stroke-dasharray:6 4
     style SVC fill:#f8fafc,stroke:#f97316
+    style KEY fill:#ffffff,stroke:#cbd5e1

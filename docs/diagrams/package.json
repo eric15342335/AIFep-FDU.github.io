@@ -5,6 +5,7 @@
     "render": "bun render.mjs"
   },
   "devDependencies": {
+    "@fontsource/source-sans-3": "5.3.0",
     "@mermaid-js/mermaid-cli": "12.2.0"
   }
 }

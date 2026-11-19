@@ -35,7 +35,9 @@ Compared with a separate OCR model such as PaddleOCR: for PDFs with a text layer
 - **Collection:** the host re-validates `answer.json` and writes `submission.xlsx`. A question without a valid answer stays empty.
 - **Observability:** every model call goes through LiteLLM and is traced in Phoenix (tokens, latency, run/question tags). Full transcripts are kept per question.
 
-![One question, end to end](diagrams/session-sequence.svg)
+![The states of one question](diagrams/question-states.svg)
+
+![The messages of one ordinary question](diagrams/session-sequence.svg)
 
 ## 4. Evaluation
 

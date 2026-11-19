@@ -16,12 +16,30 @@ const candidates = [
 const executablePath = candidates.find((path) => existsSync(path));
 if (!executablePath) throw new Error("No Chrome/Edge found; set MERMAID_BROWSER to a Chromium-based browser");
 
+// Source Sans 3 from npm, loaded before Mermaid measures the text and embedded in the SVG files,
+// so the diagrams look the same on machines without the font.
+const customFontCSS = ["400", "600"].map((weight) => ({
+	cssUrl: new URL(import.meta.resolve(`@fontsource/source-sans-3/${weight}.css`)),
+}));
+
+const FONT = '"Source Sans 3", sans-serif';
+
+const only = process.argv.slice(2);
 for (const file of readdirSync(here).filter((name) => name.endsWith(".mmd"))) {
+	if (only.length && !only.some((name) => file.startsWith(name))) continue;
 	for (const ext of ["svg", "png"]) {
 		const output = join(here, file.replace(/\.mmd$/, `.${ext}`));
 		await run(join(here, file), output, {
 			puppeteerConfig: { executablePath, headless: true },
-			parseMMDOptions: { backgroundColor: "white", viewport: { width: 1600, height: 1200, deviceScaleFactor: 2 } },
+			parseMMDOptions: {
+				backgroundColor: "white",
+				viewport: { width: 1600, height: 1200, deviceScaleFactor: 2 },
+				// Set here, not in the diagrams: Mermaid drops an init block whose font name has quotes,
+				// and a name with a digit needs them.
+				mermaidConfig: { fontFamily: FONT, themeVariables: { fontFamily: FONT } },
+				customFontCSS,
+				fontEmbed: true,
+			},
 			quiet: true,
 		});
 		console.log(`rendered ${output}`);

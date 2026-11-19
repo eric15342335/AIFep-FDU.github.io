@@ -1,0 +1,52 @@
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "16px", "lineColor": "#64748b", "primaryTextColor": "#0f172a", "edgeLabelBackground": "#ffffff"}, "flowchart": {"nodeSpacing": 26, "rankSpacing": 40, "padding": 14, "wrappingWidth": 250, "subGraphTitleMargin": {"top": 6, "bottom": 16}}}}%%
+%% The states of one question inside its sandbox, and how the host turns the result into a record.
+%% The numbers come from the code: 25 turns and 30 minutes (AgentConfig in tableqa/agent.py); one reminder
+%% and one refused empty answer (agent/pi/extensions/tableqa.ts). Run-level rules are in run-states.mmd.
+flowchart TB
+    subgraph SESSION["<b>Inside the sandbox: one agent session</b>"]
+        direction TB
+        start(["Session starts: the task,<br/>the page images and the tools"])
+        turn(["Model turn: one call to the model"])
+        what{"What did the<br/>model do?"}
+        tool(["Run the tool and send back the result<br/>(zoom sends back the enlarged image)"])
+        check{"Baseline checker:<br/>is the answer valid?"}
+        again{"First time it<br/>stopped?"}
+        remind(["Remind it once to call answer;<br/>the work so far is kept"])
+        grace(["Last turn: only the answer<br/>tool is left"])
+        saved(["Save answer.json<br/>and end the session"])
+        noanswer(["End without an answer"])
+        start --> turn --> what
+        what -- "called zoom, bash,<br/>read or write" --> tool
+        what -- "called answer" --> check
+        what -- "stopped without<br/>calling answer" --> again
+        what -- "25 turns used" --> grace
+        check -- "accepted" --> saved
+        again -- "yes" --> remind
+        again -- "no" --> noanswer
+        grace -- "answer accepted<br/>by the checker" --> saved
+        grace -- "no valid answer" --> noanswer
+        tool -.-> turn
+        remind -.-> turn
+        check -. "rejected, with the reason: wrong format,<br/>or empty (an empty answer is refused once)" .-> turn
+    end
+
+    timeout(["30 minutes have passed:<br/>the host stops the container"])
+    turn -. "at any point" .-> timeout
+    hostcheck(["Host checks answer.json again<br/>with the baseline checker"])
+    saved --> hostcheck
+    noanswer --> hostcheck
+    timeout --> hostcheck
+    record(["Save the question's record:<br/>ok, a valid answer;<br/>empty, the agent found no value;<br/>no answer, or timeout"])
+    hostcheck --> record
+
+    classDef base fill:#fefce8,stroke:#ca8a04,color:#422006
+    classDef usesBase fill:#eef2ff,stroke:#ca8a04,color:#1e1b4b,stroke-width:2px,stroke-dasharray:4 3
+    classDef ours fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef agent fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    classDef bad fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+    class check base
+    class hostcheck usesBase
+    class record ours
+    class start,turn,what,tool,again,remind,grace,saved agent
+    class timeout,noanswer bad
+    style SESSION fill:#f8fafc,stroke:#10b981,stroke-width:2px,stroke-dasharray:6 4

@@ -1,38 +1,39 @@
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "actorBkg": "#eef2ff", "actorBorder": "#6366f1", "actorTextColor": "#1e1b4b", "noteBkgColor": "#f1f5f9", "noteBorderColor": "#94a3b8", "loopTextColor": "#334155", "labelBoxBkgColor": "#f1f5f9", "labelBoxBorderColor": "#94a3b8", "signalColor": "#475569", "signalTextColor": "#0f172a"}, "sequence": {"mirrorActors": false, "noteMargin": 12}}}%%
-%% One question: how an answer gets accepted and collected.
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "16px", "actorBkg": "#ffffff", "actorBorder": "#64748b", "actorTextColor": "#0f172a", "noteBkgColor": "#f1f5f9", "noteBorderColor": "#94a3b8", "noteTextColor": "#0f172a", "signalColor": "#475569", "signalTextColor": "#0f172a"}, "sequence": {"mirrorActors": false, "noteMargin": 14, "boxMargin": 12, "boxTextMargin": 8, "messageMargin": 40, "actorMargin": 60, "wrap": true, "width": 170}}}%%
+%% Who talks to whom for one ordinary question, with one rejected answer.
+%% Every other branch (the reminder, the last answer-only turn, the 30-minute limit) is in question-states.mmd.
 sequenceDiagram
-    autonumber
-    participant R as Runner (host)
-    participant S as Sandbox (pi agent)
-    participant M as Model · via LiteLLM
-
-    Note over R: skip if this question already<br/>has an ok or empty record
-    R->>S: docker run: pages, text layer, prompt
-    S->>M: prompt + page images + tool list
-
-    loop until accepted, plain-text reply, or 25 turns
-        M-->>S: tool call
-        alt zoom / bash / read / write
-            S->>S: run tool
-            S->>M: tool result (crop image or output)
-        else answer
-            Note right of S: validate:<br/>normalize_response
-            alt invalid, or first empty answer
-                S->>M: "Rejected: reason"
-            else valid
-                Note right of S: write answer.json,<br/>end session
-            end
-        end
+    box rgb(238,242,255) On the host
+        participant R as Runner
     end
-    Note right of S: turn cap: abort,<br/>no answer.json
+    box rgb(236,253,245) Sandbox, no internet
+        participant S as AI agent (pi)
+    end
+    box rgb(254,252,232) Course baseline
+        participant C as Answer checker (normalize_response)
+    end
+    box rgb(255,247,237) Services
+        participant G as Model gateway (LiteLLM)
+        participant P as Phoenix (call log)
+        participant M as Bailian qwen3.8-flash
+    end
 
-    opt 1800 s wall clock
-        R->>S: docker kill
-    end
-    S-->>R: container exits
-    Note over R,S: re-validate answer.json
-    alt valid and non-empty
-        Note over R,S: use agent answer
-    else missing, invalid or empty
-        Note over R,S: leave empty,<br/>or use --fallback
-    end
+    R->>S: Start the container: input folder (page images, text layer, task), output folder
+    S->>G: Task, page images, tool list
+    G->>M: The same request, with the API key added
+    G--)P: A copy of the call
+    M-->>S: Call zoom on part of page 1
+    Note over S: Crops and enlarges that area
+    S->>M: The enlarged image
+    Note over S,M: Every call takes the same path through the gateway, which logs a copy in Phoenix.
+    M-->>S: Call answer with a value
+    S->>C: The answer
+    C-->>S: Rejected: wrong format, and why
+    S->>M: "Rejected", with the reason
+    M-->>S: Call answer with a corrected value
+    S->>C: The corrected answer
+    C-->>S: Valid
+    Note over S: Saves answer.json in the output folder and ends the session
+    S-->>R: The container exits
+    R->>C: answer.json, checked again
+    C-->>R: Valid
+    Note over R: Saves the question's record

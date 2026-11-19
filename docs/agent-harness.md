@@ -4,9 +4,20 @@ The agent harness answers each competition question with an AI agent instead of 
 
 The design and the reasons behind it are in [agent-harness-plan.md](agent-harness-plan.md).
 
-![Architecture](diagrams/architecture.svg)
+The four diagrams below show the harness from four sides:
 
-![One question, end to end](diagrams/session-sequence.svg)
+- **The parts and what each can reach.** The yellow dashed box is the course baseline, reused unchanged; everything else was added.
+- **The states of one question** inside its sandbox. This is the core of the method.
+- **The states of a whole run:** saved answers, the retry pass, the stop after repeated failures, and resuming after an interruption.
+- **The messages of one ordinary question,** with one rejected answer.
+
+![The parts of the harness](diagrams/architecture.svg)
+
+![The states of one question](diagrams/question-states.svg)
+
+![The states of a whole run](diagrams/run-states.svg)
+
+![The messages of one ordinary question](diagrams/session-sequence.svg)
 
 ## Quick start
 
@@ -228,4 +239,4 @@ The Bailian API key is only given to the gateway container. The agent containers
 | `agent/compose.yaml`, `agent/litellm.yaml` | The LiteLLM gateway and Phoenix |
 | `tests/` | Unit tests, a check that settings repeated across files agree (`test_config.py`), and the fake model server |
 
-Run the unit tests with `uv run pytest`. The diagrams are generated from `docs/diagrams/*.mmd`. To redraw them, run `bun install` and then `bun run render` in `docs/diagrams` (this uses the installed Edge or Chrome browser; set `MERMAID_BROWSER` to use another one).
+Run the unit tests with `uv run pytest`. The diagrams are generated from `docs/diagrams/*.mmd`. To redraw them, run `bun install` and then `bun run render` in `docs/diagrams`; add a name such as `bun run render architecture` to redraw only that one. This uses the installed Edge or Chrome browser (set `MERMAID_BROWSER` to use another one). The font, Source Sans 3, comes from npm and is embedded in each SVG file, so the diagrams look the same on machines without the font. The course report is built the same way: `bun install` and `bun run build` in `docs/report` turn `report.md` into `report.pdf`.
