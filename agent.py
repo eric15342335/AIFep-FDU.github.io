@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""CLI for the agentic harness: one pi agent in an isolated Docker sandbox per question."""
+"""Command-line entry point for the agent harness.
+
+Each question is answered by one pi agent running in its own isolated Docker container. Both commands
+prepare everything themselves: they read `.env`, rebuild the sandbox image (cached, so this takes
+seconds when nothing changed) and start the LiteLLM gateway and Phoenix tracing with Docker Compose.
+
+    uv run agent.py smoke                 # check that the model endpoint supports what the harness needs
+    uv run agent.py run --limit 10        # answer the first 10 questions
+    uv run agent.py run                   # answer all questions; rerunning resumes where it stopped
+"""
 
 from __future__ import annotations
 
@@ -7,14 +16,52 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from tableqa import agent, smoke
 from tableqa.schema import json_loads
 from tableqa.xlsxio import id_key, read_questions
 
+ROOT = Path(__file__).resolve().parent
 GATEWAY = "http://127.0.0.1:4000/v1"
+IMAGE = "tableqa-agent:dev"
+
+
+def load_env(path: Path) -> None:
+    """Read `KEY=value` lines from a .env file. Variables already set in the shell take priority."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+def start_services(image: str) -> None:
+    """Build the sandbox image and start the gateway, then wait until the gateway answers."""
+    # Always rebuild: the image contains the pi configuration, so a stale image would run old settings.
+    subprocess.run(
+        ["docker", "build", "-q", "-f", "agent/Dockerfile", "-t", image, "."], cwd=ROOT, check=True
+    )
+    subprocess.run(["docker", "compose", "-f", "agent/compose.yaml", "up", "-d"], cwd=ROOT, check=True)
+    deadline = time.monotonic() + 120
+    while True:
+        try:
+            with urlopen(GATEWAY.removesuffix("/v1") + "/health/liveliness", timeout=5):
+                return
+        except (URLError, OSError):
+            if time.monotonic() > deadline:
+                raise SystemExit(
+                    "The LiteLLM gateway did not start; see `docker compose -f agent/compose.yaml logs`"
+                ) from None
+            time.sleep(2)
 
 
 def positive(value: str) -> int:
@@ -26,20 +73,28 @@ def positive(value: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tests", type=Path, default=Path("data/tests.xlsx"))
-    parser.add_argument("--dataset-fixes", type=Path, default=Path("configs/downloaded_data_fixes.json"))
+    parser.add_argument("--tests", type=Path, default=ROOT / "data/tests.xlsx")
+    parser.add_argument("--dataset-fixes", type=Path, default=ROOT / "configs/downloaded_data_fixes.json")
+    parser.add_argument(
+        "--env-file", type=Path, default=ROOT / ".env", help="API key, base URL and model name"
+    )
+    parser.add_argument(
+        "--no-setup",
+        action="store_true",
+        help="do not build the image or start the gateway (already running)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     check = sub.add_parser("smoke", help="check the endpoint supports everything the harness needs")
     check.add_argument("--base-url", default=GATEWAY)
-    check.add_argument("--page", type=Path, default=Path("data/files/010.png"))
+    check.add_argument("--page", type=Path, default=ROOT / "data/files/010.png")
 
     run = sub.add_parser("run", help="answer the questions with the agent")
     run.add_argument("--name", default="agent", help="run name; output goes to <output-dir>/<name>")
-    run.add_argument("--files", type=Path, default=Path("data/files"))
-    run.add_argument("--output-dir", type=Path, default=Path("runs"))
+    run.add_argument("--files", type=Path, default=ROOT / "data/files")
+    run.add_argument("--output-dir", type=Path, default=ROOT / "runs")
     run.add_argument("--fallback", type=Path, help="submission whose answers fill questions the agent missed")
-    run.add_argument("--image", default="tableqa-agent:dev")
+    run.add_argument("--image", default=IMAGE)
     run.add_argument("--workers", type=positive, default=16)
     run.add_argument("--timeout", type=positive, default=1800, help="seconds per question")
     run.add_argument("--max-turns", type=positive, default=25)
@@ -51,9 +106,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--resume", action="store_true", help="give turn-capped sessions their grace turn only")
 
     args = parser.parse_args(argv)
+    load_env(args.env_file)
     model = os.getenv("AGENT_MODEL", "")
     if not model:
-        parser.error("set AGENT_MODEL (source .env)")
+        parser.error(f"AGENT_MODEL is not set; copy .env.example to {args.env_file} and fill it in")
+    if not args.no_setup:
+        start_services(getattr(args, "image", IMAGE))
 
     if args.command == "smoke":
         results = smoke.run(args.base_url, model, args.page)
