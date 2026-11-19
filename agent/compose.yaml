@@ -17,7 +17,8 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm@sha256:11175975a3093e05e92faee2fe2fe3412a3ae2fcaa849eb0fe25d5f0d8bcb2e9  # main-stable, pulled 2026-11-17
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    # One gateway process saturated a CPU core at 128 parallel containers; 4 processes share the load.
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
     volumes:
       # litellm.yaml logs full messages to Phoenix; litellm-no-messages.yaml logs only timing and tokens.
       - ./${LITELLM_CONFIG:-litellm.yaml}:/app/config.yaml:ro
