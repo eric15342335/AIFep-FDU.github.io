@@ -30,7 +30,7 @@ services:
       PHOENIX_HIDE_MESSAGES: ${PHOENIX_HIDE_MESSAGES:-false}
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
       PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
-      PHOENIX_PROJECT_NAME: tableqa-agent
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT:-tableqa-agent}
     # `docker compose up --wait` (run by agent.py) returns once this check passes.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
