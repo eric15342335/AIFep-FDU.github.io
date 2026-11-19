@@ -22,7 +22,7 @@ const css = `
 body { font-family: "Noto Serif SC", "Source Han Serif SC", "SimSun", serif; font-size: 9.6pt; line-height: 1.55; color: #111; }
 h1, h2, strong, th { font-family: "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif; }
 h1 { font-size: 15pt; margin: 0 0 4pt; text-align: center; }
-h2 { font-size: 11pt; margin: 8pt 0 3pt; }
+h2 { font-size: 11pt; margin: 8pt 0 3pt; break-after: avoid; }
 p { margin: 3pt 0; text-align: justify; }
 ul, ol { margin: 3pt 0; padding-left: 18pt; }
 li { margin: 1.5pt 0; }
