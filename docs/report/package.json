@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "description": "Builds report.pdf from report.md with the locally installed Edge or Chrome (no Chromium download).",
+  "scripts": {
+    "build": "bun build.mjs"
+  },
+  "devDependencies": {
+    "marked": "16.4.2",
+    "puppeteer-core": "25.17.0"
+  }
+}
