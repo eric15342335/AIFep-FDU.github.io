@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from PIL import Image
 
+from .prompts import FILE_NAME
 from .schema import (AnswerError, compact_json, json_loads, normalize_response,
                      structure_from_grid)
 
@@ -65,7 +66,7 @@ def mode_for(question):
 
 
 def recovery_prompt(question, mode, document=None):
-    fields = {"question": question.question.replace(question.file_name, "该文档"),
+    fields = {"question": FILE_NAME.sub("该文档", question.question),
               "table_hint": question.table_hint, "answer_format": question.answer_format}
     if mode == "feature" and document is not None:
         sizes = []
