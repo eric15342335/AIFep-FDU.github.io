@@ -1,123 +1,189 @@
-# Agentic harness: how to run
+# Agent harness: how to run it
 
-Design and rationale: [agent-harness-plan.md](agent-harness-plan.md).
+The agent harness answers each competition question with an AI agent instead of a single model call. For every question, the harness starts a fresh Docker container. Inside it, the [pi](https://github.com/earendil-works/pi) coding agent looks at the page images, reads the PDF text layer when the document has one, crops and enlarges parts of the page, runs Python for arithmetic, and finally submits an answer. The model behind the agent is Alibaba Cloud Bailian's `qwen3.8-flash`.
+
+The design and the reasons behind it are in [agent-harness-plan.md](agent-harness-plan.md).
 
 ![Architecture](diagrams/architecture.svg)
 
 ![One question, end to end](diagrams/session-sequence.svg)
 
-Diagram sources are `docs/diagrams/*.mmd`. Re-render with bun (uses the installed Edge or Chrome; set `MERMAID_BROWSER` otherwise):
+## Quick start
+
+You need three things installed: [Docker](https://docs.docker.com/get-docker/) (running), [uv](https://docs.astral.sh/uv/), and a Bailian API key from the [Alibaba Cloud Model Studio console](https://bailian.console.aliyun.com/).
+
+1. Copy the settings template and fill in your API key and base URL:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Check that the model endpoint supports everything the harness needs. This sends about 15 small requests and costs well under ¥0.10:
+
+   ```bash
+   uv run agent.py smoke
+   ```
+
+3. Answer all 908 questions:
+
+   ```bash
+   uv run agent.py run
+   ```
+
+Each command reads `.env` by itself, rebuilds the sandbox image (this takes seconds when nothing changed), and starts the model gateway and the tracing service with Docker Compose. You do not need to run any setup commands first. The answers end up in `runs/agent/submission.xlsx`.
+
+To try a few questions first, add `--limit 10` (the first ten questions) or `--ids 3,5,20` (specific questions). Use `--name` to keep separate runs in separate folders, for example `uv run agent.py run --name pilot --limit 30`.
+
+If a run stops for any reason, start the same command again. Questions that already have an answer are skipped and cost nothing. This includes a question whose container saved its answer just before the run stopped. Questions that failed or ran out of time start again from the beginning, so the tokens they used before are paid again. To redo one question on purpose, delete its file in `runs/<name>/records/`.
+
+Rerunning only some questions, for example with `--ids`, still writes every answer the run folder holds into `submission.xlsx`, not just the rerun ones. A run folder only accepts answers from one model on one server: it remembers both in `runs/<name>/origin.json` and refuses to continue if either changes, so a test run and the real run can never mix. Use a new `--name` for each server.
+
+If 8 questions in a row fail, the run stops starting new questions, because that usually means the API key, the quota or the service is broken. The questions that were never started get the status `not_started`. The command then exits with an error and tells you to run it again once the problem is fixed.
+
+## Where the model runs
+
+The main and production target is Alibaba Cloud Bailian. The competition requires Qwen models served by Alibaba Cloud, and the final submission must come from a Bailian run.
+
+For development, the harness also works with a model server on your own machine, such as [vLLM](https://docs.vllm.ai/), [SGLang](https://docs.sglang.ai/) or [Ollama](https://ollama.com/), as long as it speaks the OpenAI chat-completions API. Testing against a local server costs nothing, so it is the right place to try prompt or tool changes before spending money on the real endpoint. The `runs/full` results below came from such a development run. To use a local server:
+
+- Put the local settings in their own file, for example `.env.local`, so the real Bailian key never goes to the test server. Pass it with `uv run agent.py --env-file .env.local run --name local`.
+- Set `DASHSCOPE_BASE_URL` to the server's address as seen from inside Docker, for example `http://host.docker.internal:8000/v1`. Docker containers cannot reach `127.0.0.1` on your machine, which is why the address uses `host.docker.internal`.
+- Set `DASHSCOPE_MODEL` to the name the server uses for the model, for example `Qwen3.8-Flash-Next`. The agent still asks the gateway for `qwen3.8-flash`, and the gateway passes the request on under the server's name.
+- Set `DASHSCOPE_API_KEY` to any non-empty text if the server does not check keys.
+- With many parallel containers, also set `LITELLM_CONFIG='litellm-no-messages.yaml'`, so Phoenix records only timing and token counts (see "Watching a run").
+
+The settings for the development run in this repository looked like this:
 
 ```bash
-cd docs/diagrams && bun install && bun run render
+export DASHSCOPE_BASE_URL='http://host.docker.internal:8000/v1'
+export DASHSCOPE_API_KEY='local-test'
+export DASHSCOPE_MODEL='Qwen3.8-Flash-Next'
+export AGENT_MODEL='qwen3.8-flash'
+export LITELLM_CONFIG='litellm-no-messages.yaml'
 ```
 
-Each question runs in its own Docker container with the [pi](https://github.com/earendil-works/pi) coding agent, the page images, the PDF text layer (when present), and a fixed offline Python toolset. The agent has two extra tools: `zoom` (crop and enlarge a page region) and `answer` (submit; validated with the baseline's `normalize_response`). All model calls go through a LiteLLM gateway that logs to Arize Phoenix.
+Bailian reads the thinking settings as top-level request fields. A local server usually reads them from `chat_template_kwargs` instead and ignores the top-level fields, so on a local server the model uses its chat template's default thinking behaviour.
 
-## Layout
+## What one question looks like
 
-| Path | What |
-|---|---|
-| `agent.py` | CLI: `smoke`, `run` |
-| `tableqa/agent.py` | Runner: materials, sandbox pool, validation, submission, cost report |
-| `tableqa/smoke.py` | Endpoint checks |
-| `agent/Dockerfile` | Sandbox image (pi 1.5.2, Python tools) |
-| `agent/pi/` | pi config: `models.json`, `settings.json`, `agent-prompt.md`, `extensions/tableqa.ts` |
-| `agent/tools.py` | `zoom` and answer `check` helpers used by the extension |
-| `agent/compose.yaml`, `agent/litellm.yaml` | LiteLLM gateway + Phoenix |
-| `tests/` | Unit tests and a scripted fake LLM for an offline end-to-end check |
+1. The host prepares the document once and keeps the result in `runs/cache/`: page images (the same renderer as the baseline) and, for PDFs, the text layer with word coordinates. Some PDFs have a broken text layer, where the fonts map every character to the wrong symbol, so the text reads like `!"#$%&'()*+`. The host leaves such a layer out (fewer than half of its characters are letters, digits or Chinese characters), and the agent reads the page image instead.
+2. The host starts a container for the question. The container has no internet access. The only address it can reach is the LiteLLM model gateway.
+3. The agent receives the page images and the question, and works for up to 25 turns. Besides `read`, `bash` and `write`, it has two tools written for this task:
+   - `zoom` crops a region of a page and returns it enlarged.
+   - `answer` checks the answer against the required format (with the baseline's own validator) and ends the session. If the answer has the wrong format, the tool rejects it and tells the agent why, so it can fix it.
+4. If the agent reaches the 25-turn limit, it gets one last turn in which it can only call `answer`.
+5. The host validates the answer again, because it never trusts what comes out of a container, and writes it into `submission.xlsx`. If the agent passed its whole output object as the answer text, for example `{"answer": "培养计划课程"}`, the validator takes the inner value.
 
-## Setup (once)
+The prompt never contains a file name or a question number. Any file name in the question text, including short forms such as `62.pdf` for the file `062.pdf`, is replaced with "该文档" ("this document"). The question number is only in an environment variable inside the container, where pi uses it to tag the traces in Phoenix.
 
-Everything installs into `.venv/` or Docker images; nothing global.
+## Model settings
 
-```bash
-uv sync
-```
+These are set in `agent/pi/models.json` and sent with every model call:
+
+| Setting | Value | Why |
+|---|---|---|
+| `enable_thinking` | `true` | The model reasons before it answers or calls a tool. |
+| `reasoning_effort` | `xhigh` | The highest level Bailian offers for qwen3.8-flash (`max` and `high` mean the same). |
+| `preserve_thinking` | `true` | The model's earlier reasoning stays in the conversation, so later turns build on it. Bailian bills it as input. |
+| `vl_high_resolution_images` | `true` | Without it, Bailian shrinks every image larger than about 2.6 megapixels. About one page image in five is larger than that, and small table text becomes harder to read when it shrinks. |
+| `temperature`, `top_p`, `top_k` | 1.0, 0.95, 20 | The sampling settings recommended for thinking mode. |
+
+`uv run agent.py run --thinking off` turns thinking off (temperature 0.7, top_p 0.8).
+
+## Cost and prompt caching
+
+Bailian charges ¥0.8 per million input tokens and ¥2.7 per million output tokens for qwen3.8-flash in the Beijing region (price list read on 2026-11-19). Reasoning tokens count as output.
+
+Every turn of an agent session sends the whole conversation again, so most of the input is a repeat of the previous call. Bailian's implicit context cache recognises a repeated beginning of a request (at least 1,024 tokens) and charges cached tokens at a fraction of the input price. The cache works automatically and needs no request changes. The harness only has to keep earlier messages byte-for-byte identical, which pi does: it appends new messages and never edits old ones. Questions about the same document also share the system prompt, the tool list and the page images at the start of the first request, so they can hit the cache too.
+
+Bailian also offers an explicit cache with `cache_control` markers. The harness does not use it: creating an explicit cache entry costs more than normal input, and a hit is billed the same as an implicit hit.
+
+`runs/<name>/report.json` prints three cost figures:
+
+- `no_cache`: the price if nothing had been cached.
+- `reported_cache_hits`: the price with the cache hits that Bailian reported. This is the closest figure to the real bill.
+- `prefix_cache_best_case`: the price if every repeated beginning had been cached.
+
+## Watching a run
+
+Open Phoenix at http://127.0.0.1:6006 (project `tableqa-agent`). Every model call appears there while the run is going, with the full messages, token counts, latency and errors. Each call is tagged `run:<name>,q:<question id>`.
+
+Each call carries base64 page images of 1 to 2 MB. In an earlier run with 32 parallel containers, Phoenix fell behind and LiteLLM dropped some traces. If that happens, the run itself is not affected, because the complete record of every session is saved on disk in `runs/<name>/work/<id>/session/`.
+
+For runs with many parallel containers, set `LITELLM_CONFIG='litellm-no-messages.yaml'` in the env file. Phoenix then records each call's timing, token counts and errors, but not the messages. Without the setting, the gateway uses `agent/litellm.yaml`, which logs the full messages.
+
+If you do not need tracing, you can ignore Phoenix. It runs as its own container and the harness works the same without anyone looking at it.
+
+## Output files
+
+Everything for a run is in `runs/<name>/`:
+
+- `submission.xlsx` is the file to upload to the competition platform.
+- `report.json` contains status counts, tool-call totals, average turns, token totals, the cost figures and the total container time.
+- `records/<id>.json` holds one question's answer, status, time, turns, tool counts and token usage.
+- `work/<id>/session/*.jsonl` is the full agent transcript. `stdout.txt`, `stderr.txt` and `answer.json` are next to it.
+
+A question ends with one of these statuses: `ok` (a validated answer), `empty` (the agent decided the answer is empty), `no_answer` (the session ended without calling `answer`), `timeout`, `failed`, or `not_started` (skipped after 8 failures in a row). Questions without an answer stay empty in the submission. With `--fallback submission.xlsx`, they are filled from another submission, such as the baseline's.
+
+## Results
+
+### Development run on a local server (2026-11-17)
+
+This run used the open-weight Qwen3.8-Flash-Next model on a local vLLM server, with the same thinking level as above.
+
+| | Baseline (one model call per question) | Agent harness |
+|---|---|---|
+| Platform score | 71.6 (about 650 of 908 correct) | **78.7** (about 715 of 908 correct) |
+| Answers submitted | 908 | 907 (the agent left 1 empty on purpose) |
+
+- No answers were taken from the baseline.
+- The agent used 19.95 million input tokens and 0.99 million output tokens, with 3.14 turns per question on average.
+- Tool calls: 1,523 `zoom`, 725 `bash`, 134 `read` and 917 `answer`.
+- At Bailian prices, those tokens would cost ¥18.65 with no caching, or ¥8.05 if every repeated prefix were cached. That is ¥0.01 to ¥0.02 per question.
+- The 30 questions about the three PDFs with broken text layers (071, 072 and 073) used 26% of all tokens: 9.4 turns and about 185,000 tokens per question, against 2.8 turns and 22,000 tokens for the other PDFs. The agent kept trying to read the garbled text. The harness now leaves such text layers out.
+- Without ground truth, a comparison with the baseline's answers showed two weak spots. On table-structure questions, the agent tends to return more cells than the requested part of the table. About 30 text answers are full sentences instead of bare values.
+
+### Test run on Bailian (2026-11-19)
+
+Before the full run, `uv run agent.py smoke` passed all its checks on Bailian, and 10 questions (3 structure, 4 extraction, 3 reasoning) ran through the whole harness with 10 containers in parallel:
+
+- All 10 questions ended `ok`.
+- 6 answers were identical to the local development run. Checked by hand against the documents, the other 4 were no worse: in two (q448, a phone number, and q699, a four-row table header) the Bailian answer was right and the local one wrong. The other two (q589 and q749) differ only in whether an empty top-left header corner counts as one merged cell or two cells, which the page does not settle.
+- Bailian reported 88% of all input tokens as cache hits (578,816 cached, 79,049 not cached). The 10 questions cost ¥0.18, compared with ¥0.59 if nothing had been cached.
+- Most questions took 8 to 73 seconds. The slowest one, a large table-structure question, used 23 turns and took 9.6 minutes. On the local server, the same questions took 31 to 441 seconds each.
+
+At this rate, all 908 questions should cost roughly ¥10 to ¥20 and take about 1.5 hours with 16 containers.
+
+## Command options
+
+`uv run agent.py run` accepts:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--name` | `agent` | Run name and output folder under `runs/` |
+| `--workers` | 16 | Number of containers running at the same time |
+| `--timeout` | 1800 | Seconds allowed per question |
+| `--max-turns` | 25 | Turns before the final answer-only turn |
+| `--thinking` | `high` | `high` sends `reasoning_effort: xhigh`; `off` disables thinking |
+| `--limit`, `--ids` | all | Run only the first N questions, or only the listed ids |
+| `--fallback` | none | Fill unanswered questions from another submission file |
+| `--no-setup` | off | Skip building the image and starting the gateway |
+| `--resume` | off | Only for sessions saved before the final answer-only turn existed: give them that one turn and start nothing new |
+
+`--env-file` and `--no-setup` belong before the command name, for example `uv run agent.py --env-file test.env smoke`. Variables that are already set in your shell take priority over the file.
+
+With 16 workers, the run makes a few calls per second and uses well under Bailian's rate limit for the Beijing region (5 million tokens per minute at the lowest spending level). Each container is limited to 1 CPU and 2 GB of memory, but uses far less in practice, so 16 containers fit on an ordinary desktop computer.
+
+## Offline check without a model
+
+`tests/fake_llm.py` is a scripted model server. It always calls `zoom` first and then `answer`, and it prints every request it receives. It tests the whole chain without spending money: the container, the pi settings, the tools, images inside tool results, the gateway, Phoenix and the host-side validation.
 
 ```bash
 docker build -f agent/Dockerfile -t tableqa-agent:dev .
 ```
 
-Set `.env` (git-ignored; see `.env.example`). `AGENT_BASE_URL` is read from inside the LiteLLM container: an endpoint on this machine's localhost is `http://host.docker.internal:<port>/v1`.
-
 ```bash
-source .env && docker compose -f agent/compose.yaml up -d
-```
-
-Phoenix UI: http://127.0.0.1:6006. Gateway: http://127.0.0.1:4000/v1.
-
-## Check the endpoint
-
-```bash
-source .env && uv run python agent.py smoke
-```
-
-It must pass: text, image input, tool call, image inside a tool result (pi's message format), 30 images in one request, thinking parsed into `reasoning_content`. The Responses API line is informational.
-
-## Run
-
-Pilot on 30 questions, then read a few transcripts:
-
-```bash
-source .env && uv run python agent.py run --name pilot --limit 30
-```
-
-All 908 questions:
-
-```bash
-source .env && uv run python agent.py run
-```
-
-Submit `runs/agent/submission.xlsx` on the platform and compare with the baseline's 71.6. Questions the agent could not answer stay empty, so the score is the agent's alone; `--fallback submission.xlsx` would fill them from the baseline instead.
-
-Runs resume: finished questions (`records/<id>.json` with status `ok` or `empty`) are skipped. Delete a record to redo it.
-
-Optional control: the one-shot baseline against the same endpoint, at the same thinking level, separates "different model build" from "agent harness" in the score difference.
-
-```bash
-source .env && uv run python baseline.py run --custom-endpoint --base-url http://127.0.0.1:4000/v1 --model "$AGENT_MODEL" --output-dir runs/baseline --workers 16 --thinking --max-tokens 65536
-```
-
-## Results
-
-`runs/<name>/`:
-
-- `submission.xlsx`: the file to submit.
-- `report.json`: status counts, tool-call totals, mean turns, total tokens and sandbox time (the cost side of the result).
-- `records/<id>.json`: answer, status, seconds, turns, tool counts, token usage.
-- `work/<id>/session/*.jsonl`: full pi transcript (replayable), plus `stdout.txt`, `stderr.txt`, `answer.json`.
-
-Statuses: `ok` (validated answer), `empty` (agent submitted an empty answer), `no_answer` (session ended without `answer`), `timeout`, `failed`.
-
-At the turn cap (`--max-turns`, default 25) the agent gets one grace turn with only `answer` available. Sessions saved before that existed can be given just that turn with `--resume`, which skips every question that already has an answer.
-
-### Full run (2026-11-17)
-
-| | Baseline (one call per question) | pi agent |
-|---|---|---|
-| Platform score | 71.6 (≈650/908 correct) | **78.7** (≈715/908 correct) |
-| Answers submitted | 908 | 907 (1 deliberately empty) |
-
-- No answers were filled from the baseline.
-- Agent cost: 19.95 M input tokens and 0.99 M output tokens over 908 questions, with an average of 3.14 turns per question.
-- Tool calls: 1523 `zoom`, 725 `bash`, 134 `read` and 917 `answer`.
-- At qwen3.8-flash list prices on the official API this would cost **¥18.65** without caching, or **¥8.05** if every resent prefix hit the implicit cache. That is about ¥0.01–0.02 per question.
-- Total sandbox time was 38.4 h, run at 48 in parallel.
-- Weak spots found by comparing answers with the baseline's (no ground truth):
-  - Table-structure questions: the agent tends to return more cells than the requested sub-range.
-  - About 30 string answers are written as sentences rather than bare values.
-
-## Observability
-
-Phoenix gets one span per model call with latency, token counts, errors and the tag `run:<name>,q:<id>` (filter on `metadata.requester_metadata.headers.x-litellm-tags`). Message bodies are off (`turn_off_message_logging` in `agent/litellm.yaml`): every call carries base64 images (1–2 MB), and at 32 workers Phoenix fell behind and LiteLLM dropped span batches over the 64 MB export limit. Full transcripts are the pi session files; `pi --export <file>` turns one into HTML.
-
-## Offline check (no model needed)
-
-`tests/fake_llm.py` is a scripted server: it calls `zoom`, then `answer`. It verifies the whole chain: sandbox, pi config, extension, image round-trip, LiteLLM, Phoenix, host validation.
-
-```bash
-AGENT_BASE_URL=http://fake-llm:8000/v1 docker compose -f agent/compose.yaml up -d
+DASHSCOPE_BASE_URL=http://fake-llm:8000/v1 DASHSCOPE_API_KEY=fake docker compose -f agent/compose.yaml up -d
 ```
 
 ```bash
@@ -125,22 +191,35 @@ MSYS_NO_PATHCONV=1 docker run -d --name fake-llm --network tableqa-agent_default
 ```
 
 ```bash
-AGENT_MODEL=Qwen3.8-Flash-Next uv run python agent.py run --name e2e --ids 3,5,20 --max-turns 4
+DASHSCOPE_BASE_URL=http://fake-llm:8000/v1 DASHSCOPE_API_KEY=fake uv run agent.py run --name e2e --ids 3,5,20 --max-turns 4
 ```
 
-Expected: ids 3 and 20 `ok` with answer `42`; id 5 (`json_array`) `no_answer` after the validator rejects `42` and the turn cap aborts. Remove `runs/e2e` and `fake-llm` afterwards, then restart compose with the real `.env`.
+On Linux and macOS, replace `$(pwd -W)` with `$(pwd)` and drop `MSYS_NO_PATHCONV=1`.
 
-## Knobs
-
-`agent.py run` flags: `--name` (default `agent`), `--workers` (parallel sandboxes, default 16), `--timeout` (seconds per question, 1800), `--max-turns` (25), `--thinking off|high` (default `high`), `--limit`, `--ids`, `--fallback`.
-
-Thinking defaults to the maximum: pi level `high` maps to `reasoning_effort: xhigh` in `chat_template_kwargs` (`agent/pi/models.json`). Sampling follows the model card: thinking temperature 1.0, top_p 0.95, top_k 20; with `--thinking off`, temperature 0.7, top_p 0.8. The card's presence penalty is left out because it works against copying repeated digits. The baseline's `--thinking` sends the same kwargs and sampling.
+Expected result: questions 3 and 20 end `ok` with the answer `42`. Question 5 needs a JSON array, so the validator rejects `42` and the question ends `no_answer`. `docker logs fake-llm` shows the exact fields the gateway forwarded, including `enable_thinking`, `reasoning_effort`, `preserve_thinking` and the replayed `reasoning_content`. Afterwards, delete `runs/e2e`, run `docker rm -f fake-llm`, and run the smoke test again so that the gateway switches back to the settings in `.env`.
 
 ## Sandbox limits
 
-Per container: internal network (only the gateway is reachable), read-only root filesystem, 512 MB tmpfs `/tmp`, writable `/work` only, 1 CPU, 2 GB RAM, 256 processes, all capabilities dropped, non-root user. Python packages: pillow, pymupdf, openpyxl, numpy, pandas, opencv-python-headless.
+Each container runs on an internal Docker network where the only reachable address is the gateway. It has a read-only root filesystem, a 512 MB `/tmp`, a writable `/work` folder, 1 CPU, 2 GB of memory and at most 256 processes. All Linux capabilities are dropped and it runs as a normal user. The Python packages inside are pillow, pymupdf, openpyxl, numpy, pandas and opencv-python-headless. There are no OCR engines and no machine-learning frameworks, and nothing can be installed at run time.
 
-Not limited, bounded only by the per-question timeout:
+Two things are limited only by the per-question timeout:
 
-- **Disk in `/work`:** it is a host bind mount without a quota, so a runaway script can fill the host disk. Watch free space on a full run.
-- **Model calls from tools:** code run through `bash` can call the gateway directly, outside the turn cap. The gateway has no per-sandbox budget; Phoenix shows such calls under the question's tag only if they set the tag header, so compare `report.json` tokens with the gateway's totals.
+- `/work` is a folder on the host without a size quota, so a runaway script could fill the host disk. Keep an eye on free disk space during a full run.
+- Code that the agent runs with `bash` could call the gateway directly, outside the turn limit. The gateway only forwards `qwen3.8-flash`, so such calls cannot reach a more expensive model. To spot them, compare the token totals in `report.json` with the totals in Phoenix.
+
+The Bailian API key is only given to the gateway container. The agent containers never see it.
+
+## Project layout
+
+| Path | What it contains |
+|---|---|
+| `agent.py` | The command-line entry point (`smoke` and `run`) |
+| `tableqa/agent.py` | The runner: document preparation, the container pool, validation, the submission file and the cost report |
+| `tableqa/smoke.py` | The endpoint checks behind `agent.py smoke` |
+| `agent/Dockerfile` | The sandbox image: pi 1.5.2 and the Python tools |
+| `agent/pi/` | pi settings: the model settings, the extra system prompt, the turn limit and the `zoom` and `answer` tools |
+| `agent/tools.py` | The Python helpers behind `zoom` and the answer check |
+| `agent/compose.yaml`, `agent/litellm.yaml`, `agent/litellm-no-messages.yaml` | The LiteLLM gateway and Phoenix (with and without message logging) |
+| `tests/` | Unit tests and the fake model server |
+
+Run the unit tests with `uv run pytest`. The diagrams are generated from `docs/diagrams/*.mmd`. To redraw them, run `bun install` and then `bun run render` in `docs/diagrams` (this uses the installed Edge or Chrome browser; set `MERMAID_BROWSER` to use another one).

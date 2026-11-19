@@ -4,11 +4,27 @@
 
 使用阿里云百炼 `qwen3.8-flash` 完成复杂表格结构恢复、内容提取和内容推理。
 
+本仓库有两套方案：
+
+- **Baseline**：每道题调用一次模型，平台得分 71.6。用法见下文。
+- **Agent 方案**：每道题在独立的 Docker 容器中运行一个 AI agent。agent 可以放大页面局部、读取 PDF 文本层、用 Python 计算，最后提交经过格式校验的答案。在本地开发服务器（开源权重模型，不符合比赛对模型来源的要求，仅作开发参考）上的完整试跑得分 78.7；正式结果以百炼 qwen3.8-flash 的运行为准。用法、设计和结果见 [docs/agent-harness.md](docs/agent-harness.md)。
+
+Agent 方案只需三步（需要 Docker 和 uv）：
+
+```bash
+cp .env.example .env          # 填入百炼 API Key 和 Base URL
+uv run agent.py smoke         # 检查接口，花费不到 0.1 元
+uv run agent.py run           # 回答全部 908 题，结果在 runs/agent/submission.xlsx
+```
+
 ## 文件结构
 
 ```text
 .
-├── baseline.py                    # 主程序，固定使用 qwen3.8-flash
+├── baseline.py                    # Baseline 主程序，固定使用 qwen3.8-flash
+├── agent.py                       # Agent 方案入口：smoke（检查接口）和 run（答题）
+├── agent/                         # Agent 沙箱镜像、pi 配置、LiteLLM 网关和 Phoenix
+├── docs/                          # Agent 方案的设计、用法和结果
 ├── tableqa/                       # 预处理、提示词、API 请求、校验与恢复
 ├── run.sh                         # 运行入口
 ├── requirements.txt

@@ -31,6 +31,7 @@ Compared with a separate OCR model such as PaddleOCR: for PDFs with a text layer
   - `answer(answer, calculations)` validates with the baseline's `normalize_response`, writes `answer.json`, ends the session.
 - **Prompt:** the baseline's prompt for the question type (`tableqa/prompts.py`), plus a short note on the tools and on submitting through `answer`.
 - **Limits:** 25 turns, 30 minutes per question, maximum reasoning effort.
+- **Model:** `qwen3.8-flash` on Alibaba Cloud Bailian for the real run. During development, the same harness ran against the open-weight Qwen3.8-Flash-Next model on a local vLLM server, which costs nothing per call.
 - **Collection:** the host re-validates `answer.json` and writes `submission.xlsx`. A question without a valid answer stays empty.
 - **Observability:** every model call goes through LiteLLM and is traced in Phoenix (tokens, latency, run/question tags). Full transcripts are kept per question.
 
@@ -42,7 +43,7 @@ The platform scores submissions (5 per day). The plan uses 1–2 submissions:
 
 1. Run the agent on all 908 questions, submit, compare with the baseline's 71.6.
 2. Report the cost next to the score: tokens, wall-clock time, tool calls and turns per question (`report.json`).
-3. Optional control: the one-shot baseline against the same model endpoint (one extra submission), so the score difference can be attributed to the harness rather than to the model build.
+3. Optional control: the one-shot baseline against the same model (one extra submission), so the score difference can be attributed to the harness rather than to a different model version.
 
 No tuning against the leaderboard between submissions, so there is nothing to overfit.
 
@@ -58,11 +59,14 @@ Risks:
 2. **No `answer` call:** if the model ends with plain text, the question stays empty.
 3. **Images in tool results** must reach the model; `agent.py smoke` checks this before any run.
 4. **Cost:** an agent session uses many more tokens than one request. Recorded and reported, not hidden.
-5. **Context growth:** every zoom adds an image; the endpoint must accept about 30 images per request (checked by `smoke`).
+5. **Context growth:** every zoom adds an image, so the model API must accept about 30 images per request (`smoke` checks this).
 
 ## Sources
 
 - Qwen3.8-Flash-Next model card: https://huggingface.co/Qwen/Qwen3.8-Flash-Next
+- Bailian qwen3.8-flash: https://docs.modelstudio.console.alibabacloud.com/en/model-studio/qwen3-8-flash
+- Bailian context cache: https://help.aliyun.com/zh/model-studio/context-cache
+- Bailian OpenAI-compatible API: https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions
 - pi: https://pi.dev/changelog/2026/5/7/pi-has-a-new-home
 - pi custom models: https://unpkg.com/@earendil-works/pi-coding-agent@0.83.0/docs/models.md
 - Phoenix tracing: https://arize.com/docs/phoenix/integrations/coding-agents/codex

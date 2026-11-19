@@ -20,7 +20,7 @@ flowchart TB
     subgraph SVC["Gateway services"]
         direction LR
         gw["Model gateway · LiteLLM<br/><small>joins both networks</small>"]
-        model["Qwen model API<br/><small>OpenAI-compatible</small>"]
+        model["Alibaba Cloud Bailian · qwen3.8-flash<br/><small>or a local OpenAI-compatible server for testing</small>"]
         trace["Tracing · Arize Phoenix"]
         gw --> model
         gw -. "spans tagged run: / q:" .-> trace
