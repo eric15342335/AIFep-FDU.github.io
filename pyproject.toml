@@ -33,3 +33,15 @@ follow_imports = "silent"  # baseline modules predate typing; check only the new
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.pylint.main]
+max-line-length = 110
+
+[tool.pylint."messages control"]
+# Docstrings are written where they explain something. The size limits flag the CLI and the runner,
+# whose arguments mirror the command-line options; the sandbox helper imports late on purpose.
+disable = [
+    "missing-module-docstring", "missing-class-docstring", "missing-function-docstring",
+    "too-many-locals", "too-many-arguments", "too-many-positional-arguments",
+    "too-many-instance-attributes", "import-outside-toplevel",
+]

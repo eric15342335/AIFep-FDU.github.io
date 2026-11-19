@@ -7,7 +7,7 @@ import io
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -62,24 +62,36 @@ def number_card(text: str, size: tuple[int, int] = (640, 240)) -> Image.Image:
     return image
 
 
-def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
+class Endpoint:
+    """Sends small test requests to the model endpoint; each `*_check` method tests one capability."""
+
     # Bailian's OpenAI-compatible fields, top level (the same ones pi sends; see agent/pi/models.json).
-    off = {"enable_thinking": False}
+    THINKING_OFF: ClassVar[dict[str, Any]] = {"enable_thinking": False}
 
-    def call(messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
-        payload = {"model": model, "messages": messages, "max_tokens": 2048, "temperature": 0, **off, **extra}
-        return post(base_url, "/chat/completions", payload)
+    def __init__(self, base_url: str, model: str, page: Path) -> None:
+        self.base_url, self.model, self.page = base_url, model, page
 
-    def chat(messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
-        return call(messages, **extra)["choices"][0]["message"]
+    def call(self, messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": 2048,
+            "temperature": 0,
+            **self.THINKING_OFF,
+            **extra,
+        }
+        return post(self.base_url, "/chat/completions", payload)
 
-    def text_check() -> str:
-        reply = chat([{"role": "user", "content": "Reply with exactly: OK"}])
+    def chat(self, messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+        return self.call(messages, **extra)["choices"][0]["message"]
+
+    def text_check(self) -> str:
+        reply = self.chat([{"role": "user", "content": "Reply with exactly: OK"}])
         assert "OK" in (reply.get("content") or ""), reply
         return reply["content"].strip()
 
-    def image_check() -> str:
-        reply = chat(
+    def image_check(self) -> str:
+        reply = self.chat(
             [
                 {
                     "role": "user",
@@ -93,10 +105,10 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         assert "47391" in (reply.get("content") or ""), reply
         return reply["content"].strip()
 
-    def baseline_image_check() -> str:
+    def baseline_image_check(self) -> str:
         # The baseline adds a per-image max_pixels key (DashScope extension).
         part = image_part(number_card("8642")) | {"max_pixels": 5760000}
-        reply = chat(
+        reply = self.chat(
             [
                 {
                     "role": "user",
@@ -107,9 +119,9 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         )
         return (reply.get("content") or "").strip()
 
-    def tool_call_check() -> str:
-        page_image = Image.open(page).convert("RGB")
-        reply = chat(
+    def tool_call_check(self) -> str:
+        page_image = Image.open(self.page).convert("RGB")
+        reply = self.chat(
             [
                 {
                     "role": "user",
@@ -127,17 +139,17 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         json.loads(calls[0]["function"]["arguments"])
         return calls[0]["function"]["arguments"]
 
-    def tool_result_image_check() -> str:
+    def tool_result_image_check(self) -> str:
         # Same message shape pi uses for openai-completions: tool text, then a user message with the image.
-        call = {
+        tool_call = {
             "id": "call_1",
             "type": "function",
             "function": {"name": "zoom", "arguments": '{"page":1,"x0":0,"y0":0,"x1":500,"y1":500}'},
         }
-        reply = chat(
+        reply = self.chat(
             [
                 {"role": "user", "content": "Zoom into page 1 and tell me the number you see. Digits only."},
-                {"role": "assistant", "content": "", "tool_calls": [call]},
+                {"role": "assistant", "content": "", "tool_calls": [tool_call]},
                 {"role": "tool", "tool_call_id": "call_1", "content": "page 1, region (0, 0, 500, 500)"},
                 {
                     "role": "user",
@@ -152,15 +164,15 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
         assert "90517" in (reply.get("content") or ""), reply
         return reply["content"].strip()
 
-    def many_images_check() -> str:
+    def many_images_check(self) -> str:
         parts = [image_part(number_card(str(i), (200, 120))) for i in range(30)]
-        reply = chat(
+        reply = self.chat(
             [{"role": "user", "content": [*parts, {"type": "text", "text": "How many images? Number only."}]}]
         )
         return (reply.get("content") or "").strip()
 
-    def thinking_check() -> str:
-        result = call(
+    def thinking_check(self) -> str:
+        result = self.call(
             [{"role": "user", "content": "What is 17*23? Number only."}],
             enable_thinking=True,
             reasoning_effort="xhigh",
@@ -175,16 +187,16 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
             f"answer {reply.get('content', '').strip()}"
         )
 
-    def high_res_check() -> str:
+    def high_res_check(self) -> str:
         # A page over the default 2.6 MP cap: the flag must raise its image tokens, not cap them.
         page_image = Image.new("RGB", (1600, 2400), "white")
         message = [{"role": "user", "content": [image_part(page_image), {"type": "text", "text": "OK?"}]}]
-        default = call(message, max_tokens=8)["usage"]["prompt_tokens"]
-        high = call(message, max_tokens=8, vl_high_resolution_images=True)["usage"]["prompt_tokens"]
+        default = self.call(message, max_tokens=8)["usage"]["prompt_tokens"]
+        high = self.call(message, max_tokens=8, vl_high_resolution_images=True)["usage"]["prompt_tokens"]
         assert high > default, (default, high)
         return f"prompt tokens {default} default, {high} with vl_high_resolution_images"
 
-    def preserve_thinking_check() -> str:
+    def preserve_thinking_check(self) -> str:
         # The reasoning pi replays in history must reach the model (and is billed as input).
         history = [
             {"role": "user", "content": "Pick a number."},
@@ -192,36 +204,41 @@ def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
             {"role": "user", "content": "Say it again. Number only."},
         ]
         thinking = {"enable_thinking": True, "temperature": 1.0, "max_tokens": 64}
-        kept = call(history, preserve_thinking=True, **thinking)["usage"]["prompt_tokens"]
-        dropped = call(history, preserve_thinking=False, **thinking)["usage"]["prompt_tokens"]
+        kept = self.call(history, preserve_thinking=True, **thinking)["usage"]["prompt_tokens"]
+        dropped = self.call(history, preserve_thinking=False, **thinking)["usage"]["prompt_tokens"]
         assert kept > dropped + 300, (kept, dropped)
         return f"prompt tokens {kept} with history reasoning, {dropped} without"
 
-    def cache_check() -> str:
+    def cache_check(self) -> str:
         # Implicit prefix cache: a repeated long prompt should report cached tokens (not guaranteed).
         rows = "\n".join(f"| row {i} | {i * 37 % 101} | {i * 53 % 97} |" for i in range(400))
         message = [{"role": "user", "content": f"Table:\n{rows}\nReply with exactly: OK"}]
-        first = call(message, max_tokens=8)["usage"]
-        second = call(message, max_tokens=8)["usage"]
+        first = self.call(message, max_tokens=8)["usage"]
+        second = self.call(message, max_tokens=8)["usage"]
         cached = (second.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
         return f"prompt tokens {first['prompt_tokens']}, cached on repeat {cached}"
 
-    checks: list[tuple[str, Callable[[], str]]] = [
-        ("text", text_check),
-        ("image input", image_check),
-        ("baseline image + json mode", baseline_image_check),
-        ("tool call", tool_call_check),
-        ("image in tool result (pi format)", tool_result_image_check),
-        ("30 images in one request", many_images_check),
-        ("thinking on, parsed", thinking_check),
-        ("high-resolution images", high_res_check),
-        ("preserve_thinking replays reasoning", preserve_thinking_check),
-        ("implicit prefix cache (info only)", cache_check),
-    ]
-    results = []
-    for name, check in checks:
-        try:
-            results.append((name, True, check()[:120]))
-        except (AssertionError, RuntimeError, URLError, TimeoutError, KeyError, ValueError) as exc:
-            results.append((name, False, str(exc)[:300]))
-    return results
+    def run_all(self) -> list[tuple[str, bool, str]]:
+        checks: list[tuple[str, Callable[[], str]]] = [
+            ("text", self.text_check),
+            ("image input", self.image_check),
+            ("baseline image + json mode", self.baseline_image_check),
+            ("tool call", self.tool_call_check),
+            ("image in tool result (pi format)", self.tool_result_image_check),
+            ("30 images in one request", self.many_images_check),
+            ("thinking on, parsed", self.thinking_check),
+            ("high-resolution images", self.high_res_check),
+            ("preserve_thinking replays reasoning", self.preserve_thinking_check),
+            ("implicit prefix cache (info only)", self.cache_check),
+        ]
+        results = []
+        for name, check in checks:
+            try:
+                results.append((name, True, check()[:120]))
+            except (AssertionError, RuntimeError, URLError, TimeoutError, KeyError, ValueError) as exc:
+                results.append((name, False, str(exc)[:300]))
+        return results
+
+
+def run(base_url: str, model: str, page: Path) -> list[tuple[str, bool, str]]:
+    return Endpoint(base_url, model, page).run_all()
