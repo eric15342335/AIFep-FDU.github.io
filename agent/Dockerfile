@@ -1,6 +1,6 @@
 # The sandbox image for one agent session: the pi agent and a fixed set of offline Python tools.
 # It contains no model weights and no OCR engines. `uv run agent.py` builds it automatically.
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends bash ca-certificates python3 ripgrep \
