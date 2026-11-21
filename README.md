@@ -34,7 +34,7 @@ uv run agent.py run           # 回答全部 908 题，结果在 runs/agent/subm
 ├── data/
 │   ├── tests.xlsx                 # 908 道题
 │   └── files/                     # 89 份实际引用文档，共 97 页
-└── submission.xlsx                # 已生成的 Qwen3.8-Flash 全量预测结果
+└── submission-agent-bailian-78.6.xlsx  # Agent 方案正式提交的结果（百炼 qwen3.8-flash，平台得分 78.6）
 ```
 
 ## 运行
@@ -57,19 +57,19 @@ bash run.sh --limit 3 --workers 1 --max-requests 10
 bash run.sh --workers 2 --max-requests 2000
 ```
 
-每次运行的结果和缓存位于 `runs/qwen3_8_flash/`。全量完成且所有题目均生成非空答案后，程序会同步更新根目录的 `submission.xlsx`。少量试跑保留根目录已有的全量结果。
+每次运行的结果和缓存位于 `runs/qwen3_8_flash/`。全量完成且所有题目均生成非空答案后，程序会把结果复制到根目录的 `submission.xlsx`。少量试跑不会写这个文件。
 
 检查数据或提交文件：
 
 ```bash
 python baseline.py inspect
-python baseline.py validate
+python baseline.py validate --submission submission-agent-bailian-78.6.xlsx
 ```
 
 题目读取会自动应用 `configs/downloaded_data_fixes.json` 中的 3 项文件名映射和 1 条题型修正。程序支持 JSON 修复、数值提取的纯文本恢复、结构占用网格恢复和断点续跑，计算题用 `Decimal` 重算模型给出的表达式。
 
-## submission.xlsx
+## 提交文件
 
-根目录文件是此前 Qwen3.8-Flash 已生成的 908 题预测，包含 `id`、`answer` 两列，908 行答案均非空，并通过 ID 和格式校验。题目没有提供标准答案，该文件是模型预测结果。
+`submission-agent-bailian-78.6.xlsx` 是 Agent 方案在百炼 qwen3.8-flash 上正式运行的结果，与 `runs/bailian-full/submission.xlsx` 相同，平台得分 78.6。文件包含 `id`、`answer` 两列，908 行答案均非空，并通过 ID 和格式校验。题目没有提供标准答案，该文件是模型预测结果。
 
 赛题来源：[知乎知学堂大模型挑战赛：大模型复杂表格识别与内容理解](https://tianchi.aliyun.com/competition/entrance/532510/information)。
