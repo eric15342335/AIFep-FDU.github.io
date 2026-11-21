@@ -11,8 +11,11 @@ python3 - <<'EOF'
 import json, os
 path = os.environ["PI_CODING_AGENT_DIR"] + "/models.json"
 config = json.load(open(path))
-model = config["providers"]["local"]["models"][0]
+# Use the entry named after the model (Bailian's defaults for it), else the first one, and only that one.
+models = config["providers"]["local"]["models"]
+model = next((m for m in models if m["id"] == os.environ["AGENT_MODEL"]), models[0])
 model["id"] = model["name"] = os.environ["AGENT_MODEL"]
+config["providers"]["local"]["models"] = [model]
 json.dump(config, open(path, "w"), indent=2)
 EOF
 

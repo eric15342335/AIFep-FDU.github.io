@@ -29,10 +29,14 @@ from .xlsxio import Question, id_key, read_rows, write_submission
 
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 NETWORK = "tableqa-sandbox"
-# qwen3.8-flash list price on Bailian (Beijing), RMB per million tokens, read 2026-11-19.
-# Same for thinking and non-thinking; output includes the reasoning tokens. The implicit-cache
-# price is not published in RMB: 0.1 follows the USD ratio (0.014 / 0.113 of input).
-PRICE_RMB = {"input": 0.8, "cached_input": 0.1, "output": 2.7}
+# List prices on Bailian (Beijing), RMB per million tokens. Same for thinking and non-thinking;
+# output includes the reasoning tokens. qwen3.8-flash, read 2026-11-19: its implicit-cache price is
+# not published in RMB, so 0.1 follows the USD ratio (0.014 / 0.113 of input). qwen4-max, read
+# 2026-11-22: cache hits are listed at 0.5. Other model names (local test servers) use the flash price.
+PRICE_RMB = {
+    "qwen3.8-flash": {"input": 0.8, "cached_input": 0.1, "output": 2.7},
+    "qwen4-max": {"input": 10.0, "cached_input": 0.5, "output": 30.0},
+}
 SUBMIT_NOTE = (
     "提交方式：不要直接输出 JSON，而是调用 answer 工具。answer 参数填写上述 JSON 中 answer 字段的值；"
     "推理题把 calculations 数组填入 calculations 参数。"
@@ -318,14 +322,15 @@ def session_stats(session_dir: Path) -> dict[str, Any]:
     return {"turns": turns, "tools": dict(tools), "usage": dict(usage)}
 
 
-def cost_rmb(tokens: dict[str, int]) -> dict[str, float]:
+def cost_rmb(tokens: dict[str, int], model: str = "qwen3.8-flash") -> dict[str, float]:
     """Official API cost of these tokens: with no cache, with the hits the API reported, best case."""
     hits, output = tokens.get("cacheRead", 0), tokens.get("output", 0)
     prompt = tokens.get("input", 0) + hits
+    price = PRICE_RMB.get(model, PRICE_RMB["qwen3.8-flash"])
 
     def cost(cached: int) -> float:
-        paid = (prompt - cached) * PRICE_RMB["input"] + cached * PRICE_RMB["cached_input"]
-        return round((paid + output * PRICE_RMB["output"]) / 1e6, 4)
+        paid = (prompt - cached) * price["input"] + cached * price["cached_input"]
+        return round((paid + output * price["output"]) / 1e6, 4)
 
     return {
         "no_cache": cost(0),
@@ -396,7 +401,7 @@ def summarize(config: AgentConfig, selected: list[Question], results: list[dict[
         "tool_calls": dict(sum((Counter(r.get("tools", {})) for r in results), Counter())),
         "mean_turns": round(sum(r.get("turns", 0) for r in results) / max(1, len(results)), 2),
         "tokens": dict(usage),
-        "official_api_cost_rmb": cost_rmb(usage),
+        "official_api_cost_rmb": cost_rmb(usage, config.model),
         "sandbox_seconds": round(sum(r.get("seconds", 0) for r in results), 1),
     }
 

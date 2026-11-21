@@ -54,7 +54,9 @@ def test_cost_estimate_counts_previous_call_as_cached_prefix(tmp_path):
     usage = session_stats(tmp_path)["usage"]
     assert usage["cachedEstimate"] == 5200  # turn 2 resends turn 1's prompt and reply
     cost = cost_rmb(usage)
-    inp, cached, out = PRICE_RMB["input"], PRICE_RMB["cached_input"], PRICE_RMB["output"]
+    price = PRICE_RMB["qwen3.8-flash"]
+    inp, cached, out = price["input"], price["cached_input"], price["output"]
+    assert cost_rmb(usage, "qwen4-max")["no_cache"] == round((12000 * 10 + 300 * 30) / 1e6, 4)
     assert cost["no_cache"] == round((12000 * inp + 300 * out) / 1e6, 4)
     assert cost["prefix_cache_best_case"] == round((6800 * inp + 5200 * cached + 300 * out) / 1e6, 4)
 

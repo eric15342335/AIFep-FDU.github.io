@@ -34,6 +34,30 @@
             "vl_high_resolution_images": true
           },
           "samplingParamsByThinkingLevel": { "off": { "temperature": 0.7, "top_p": 0.8 } }
+        },
+        {
+          "id": "qwen4-max",
+          "name": "qwen4-max",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": "low",
+            "low": "low",
+            "medium": "high",
+            "high": "xhigh"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 262144,
+          "maxTokens": 65536,
+          "samplingParams": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "presence_penalty": 0.0,
+            "preserve_thinking": true
+          },
+          "samplingParamsByThinkingLevel": {
+            "off": { "temperature": 0.7, "top_p": 0.8, "presence_penalty": 1.5 }
+          }
         }
       ]
     }

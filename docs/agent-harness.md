@@ -102,6 +102,8 @@ These are set in `agent/pi/models.json` and sent with every model call:
 
 `uv run agent.py run --thinking off` turns thinking off (temperature 0.7, top_p 0.8).
 
+The default model is qwen3.8-flash, and the table above describes it. `agent/pi/models.json` also has an entry for `qwen4-max` with Bailian's default settings for that model: temperature 1.0, top_p 0.95, top_k 20 and presence_penalty 0 in thinking mode. It leaves out `vl_high_resolution_images`, because qwen4-max already reads images at full resolution. To use it, set `AGENT_MODEL='qwen4-max'` and use a new `--name`. It costs about ten times as much as qwen3.8-flash: in a 20-question test it cost 3.79 元, compared with 0.38 元 for qwen3.8-flash on the same questions. `agent.py smoke` then reports one FAIL for `vl_high_resolution_images`, because that setting has no effect on qwen4-max.
+
 ## Cost and prompt caching
 
 Bailian charges ¥0.8 per million input tokens and ¥2.7 per million output tokens for qwen3.8-flash in the Beijing region (price list read on 2026-11-19). Reasoning tokens count as output.
