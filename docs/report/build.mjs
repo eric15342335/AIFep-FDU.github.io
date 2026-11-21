@@ -28,7 +28,7 @@ p { margin: 3pt 0; }
 ul, ol { margin: 3pt 0; padding-left: 18pt; }
 li { margin: 1.5pt 0; }
 code { font-family: Consolas, "Source Code Pro", monospace; font-size: 0.92em; background: #f3f4f6; padding: 0 2pt; border-radius: 2pt; }
-a { color: inherit; text-decoration: none; }
+a { color: #1f4e9c; text-decoration: none; }
 table { border-collapse: collapse; margin: 4pt 0; width: 100%; }
 th, td { border-top: 0.6pt solid #999; border-bottom: 0.6pt solid #999; padding: 2.5pt 5pt; text-align: left; }
 figure { margin: 4pt 0; text-align: center; break-inside: avoid; }

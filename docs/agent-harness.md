@@ -98,7 +98,7 @@ These are set in `agent/pi/models.json` and sent with every model call:
 | `reasoning_effort` | `xhigh` | The highest level Bailian offers for qwen3.8-flash (`max` and `high` mean the same). |
 | `preserve_thinking` | `true` | The model's earlier reasoning stays in the conversation, so later turns build on it. Bailian bills it as input. |
 | `vl_high_resolution_images` | `true` | Without it, Bailian shrinks every image larger than about 2.6 megapixels. About one page image in five is larger than that, and small table text becomes harder to read when it shrinks. |
-| `temperature`, `top_p`, `top_k` | 0.6, 0.95, 20 | Bailian's documented settings for qwen3.8-flash in thinking mode with image input ("0.6 for visual understanding, 1.0 for text input"). Every question starts from page images. The local development runs up to `runs/local-v2` used 1.0. |
+| `temperature`, `top_p`, `top_k` | 0.6, 0.95, 20 | Bailian's documented settings for qwen3.8-flash in thinking mode with image input ("0.6 for visual understanding, 1.0 for text input", in the [Chat API parameter reference](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)). Every question starts from page images. The local development runs up to `runs/local-v2` used 1.0. |
 
 `uv run agent.py run --thinking off` turns thinking off (temperature 0.7, top_p 0.8).
 
