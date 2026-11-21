@@ -27,6 +27,7 @@ uv run agent.py run           # 回答全部 908 题，结果在 runs/agent/subm
 ├── docs/                          # Agent 方案的设计、用法和结果
 ├── tableqa/                       # 预处理、提示词、API 请求、校验与恢复
 ├── run.sh                         # 运行入口
+├── CONTEXT.md                     # 天池赛题页面的文字副本（规则、题型、答案格式）
 ├── requirements.txt
 ├── .env.example
 ├── configs/downloaded_data_fixes.json
